@@ -1,6 +1,6 @@
 ---
 title: "SiQ-VL: Training a Reasoning-Capable VLM When You’re GPU-Poor"
-date: 2025-12-22
+date: 2025-12-05
 tags: ["VLM", "Multimodal", "Reasoning", "Distillation", "SigLIP", "Qwen"]
 categories: ["Engineering", "Research"]
 draft: false
