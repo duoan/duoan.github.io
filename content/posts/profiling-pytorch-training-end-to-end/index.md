@@ -59,7 +59,7 @@ All numbers in this post were collected on the local machine backing this repo:
 - PyTorch: `torch 2.10.0+cu128`
 - OS: WSL2 kernel `6.6.87.2-microsoft-standard-WSL2`
 
-The training lab and experiment runner live in the companion `playground-cuda` repo. I bundled the generated artifacts for this post here so the writeup stays self-contained.
+The training lab and experiment runner live in the companion repo: [duoan/playground-cuda](https://github.com/duoan/playground-cuda). I bundled the generated artifacts for this post here so the writeup stays self-contained.
 
 The raw artifacts for this article are checked in:
 

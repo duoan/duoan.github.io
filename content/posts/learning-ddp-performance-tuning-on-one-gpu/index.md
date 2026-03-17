@@ -63,7 +63,7 @@ All runs in this post came from the local machine behind this repo:
 
 The actual DDP lab in this post runs on CPU with `gloo`, on purpose. That keeps the experiment reproducible on a one-GPU machine while preserving the distributed behaviors I care about.
 
-The lab and experiment runner live in the companion `playground-cuda` repo. I bundled the generated artifacts here so the post can stand on its own.
+The lab and experiment runner live in the companion repo: [duoan/playground-cuda](https://github.com/duoan/playground-cuda). I bundled the generated artifacts here so the post can stand on its own.
 
 The generated artifacts for this article are checked in:
 

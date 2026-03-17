@@ -53,7 +53,7 @@ This is why DDP jobs with variable-length text often feel mysterious at first. Y
 
 ## Setup
 
-I used a small synthetic lab from the companion `playground-cuda` repo and bundled the generated artifacts here with the post.
+I used a small synthetic lab from the companion repo: [duoan/playground-cuda](https://github.com/duoan/playground-cuda), and bundled the generated artifacts here with the post.
 
 The lab uses:
 
