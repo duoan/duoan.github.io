@@ -63,7 +63,7 @@ All runs in this post came from the local machine behind this repo:
 
 The actual DDP lab in this post runs on CPU with `gloo`, on purpose. That keeps the experiment reproducible on a one-GPU machine while preserving the distributed behaviors I care about.
 
-The lab and experiment runner live in the companion repo: [duoan/playground-cuda](https://github.com/duoan/playground-cuda). I bundled the generated artifacts here so the post can stand on its own.
+The original Markdown source for this post lives in the companion repo at [docs/pytorch_ddp_performance_tuning_blog.md](https://github.com/duoan/playground-cuda/blob/main/docs/pytorch_ddp_performance_tuning_blog.md). I bundled the generated artifacts here so the post can stand on its own.
 
 The generated artifacts for this article are checked in:
 
