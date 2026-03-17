@@ -1,6 +1,6 @@
 ---
 title: "Profiling a PyTorch Training Job End to End"
-date: 2026-03-17
+date: 2026-01-16
 tags: ["PyTorch", "Performance", "Profiling", "CUDA", "Nsight"]
 categories: ["Engineering", "Performance"]
 draft: false

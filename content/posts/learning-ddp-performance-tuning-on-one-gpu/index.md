@@ -1,6 +1,6 @@
 ---
 title: "Learning PyTorch DDP Performance Tuning on a One-GPU Machine"
-date: 2026-03-17
+date: 2026-02-18
 tags: ["PyTorch", "DDP", "Distributed Training", "Performance", "Systems"]
 categories: ["Engineering", "Performance"]
 draft: false

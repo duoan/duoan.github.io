@@ -1,6 +1,6 @@
 ---
 title: "Why Variable Sequence Length Breaks DDP Throughput"
-date: 2026-03-17
+date: 2026-03-12
 tags: ["Transformer", "LLM", "DDP", "Performance", "Data Pipeline"]
 categories: ["Engineering", "Performance"]
 draft: false
