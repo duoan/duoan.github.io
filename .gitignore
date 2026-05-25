@@ -30,6 +30,8 @@ _testmain.go
 !.vscode/extensions.json
 !.vscode/tasks.json
 !.vscode/launch.json
+# Personal multi-root workspace files (reference paths outside the repo).
+*.code-workspace
 
 # --- Python (playground/) -----------------------------------------------
 __pycache__/
