@@ -1,0 +1,50 @@
+[project]
+name = "duoan-playground"
+version = "0.0.0"
+description = "ML systems experiments backing duoan.github.io (lives in playground/)"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "matplotlib>=3.8",
+    "torch>=2.10",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.6",
+    "pytest>=8",
+    "ipykernel>=6.29",
+]
+
+# Pin torch to the cu130 index on Linux/Windows. macOS falls back to the default
+# PyPI index, which only ships CPU wheels — fine for editor work, not for runs.
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# All first-party Python lives under playground/. Keep ruff out of the Hugo
+# tree (themes/PaperMod is a git submodule, public/ is build output, etc.)
+src = ["playground"]
+extend-exclude = [
+    "themes/",
+    "public/",
+    "resources/",
+    "content/",
+    "layouts/",
+    "static/",
+    "archetypes/",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]

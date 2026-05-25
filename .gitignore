@@ -1,28 +1,68 @@
-# Compiled Object files, Static and Dynamic libs (Shared Objects)
+# --- Hugo ----------------------------------------------------------------
+/public
+.hugo_build.lock
+resources/_gen/
+
+# --- Go (kept from original) --------------------------------------------
 *.o
 *.a
 *.so
-
-# Folders
 _obj
 _test
-
-# Architecture specific extensions/prefixes
 *.[568vq]
 [568vq].out
-
 *.cgo1.go
 *.cgo2.c
 _cgo_defun.c
 _cgo_gotypes.go
 _cgo_export.*
-
 _testmain.go
-
 *.exe
 *.test
 
-/public
+# --- OS / editor --------------------------------------------------------
 .DS_Store
-.hugo_build.lock
-resources/_gen/
+.idea/
+.vscode/
+
+# --- Python (playground/) -----------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+*.egg-info/
+build/
+dist/
+.uv/
+
+# Notebooks: keep the .ipynb files but never commit kernel state output
+# (uncomment if you want this; defaults to keeping outputs)
+# *.ipynb
+
+# --- CUDA / Profiling artifacts -----------------------------------------
+# Raw nsys / ncu traces are large; opt-in per file with `git add -f` if a
+# specific trace is worth preserving.
+*.nsys-rep
+*.qdrep
+*.qdrep-nsys
+*.qdstrm
+*.ncu-rep
+*.sqlite
+core.*
+
+# Hand-built CUDA extension caches (load_inline / setuptools)
+torch_extensions/
+.cache/
+
+# --- Per-experiment results that shouldn't be committed ------------------
+# By default we DO commit small svgs / csvs under playground/**/results/
+# because they're cited from blog posts. Uncomment the next line to flip
+# that policy:
+# playground/**/results/
