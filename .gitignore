@@ -23,7 +23,13 @@ _testmain.go
 # --- OS / editor --------------------------------------------------------
 .DS_Store
 .idea/
-.vscode/
+# Commit shared VSCode config (settings/extensions/tasks/launch),
+# ignore everything else under .vscode/.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
 
 # --- Python (playground/) -----------------------------------------------
 __pycache__/
@@ -47,14 +53,9 @@ dist/
 # *.ipynb
 
 # --- CUDA / Profiling artifacts -----------------------------------------
-# Raw nsys / ncu traces are large; opt-in per file with `git add -f` if a
-# specific trace is worth preserving.
-*.nsys-rep
-*.qdrep
-*.qdrep-nsys
-*.qdstrm
-*.ncu-rep
-*.sqlite
+# Profile outputs (*.nsys-rep, *.ncu-rep, *.qdrep*, *.qdstrm, *.sqlite) are
+# tracked via Git LFS — see .gitattributes. They are real experiment data,
+# not throw-away build output, so we DO commit them.
 core.*
 
 # Hand-built CUDA extension caches (load_inline / setuptools)

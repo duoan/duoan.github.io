@@ -1,0 +1,35 @@
+# Files Cursor's AI / @-mention indexer should skip.
+# Same idea as .gitignore but for AI context, not git.
+
+# Hugo theme submodule — large, not authored here.
+themes/
+
+# Hugo build outputs / caches.
+public/
+resources/
+.hugo_build.lock
+
+# Generated / large lock files — not useful as AI context.
+uv.lock
+
+# Virtualenvs and Python caches.
+.venv/
+__pycache__/
+.ruff_cache/
+.pytest_cache/
+
+# CUDA / torch JIT artifacts.
+torch_extensions/
+.cache/
+
+# Profiling outputs — tracked via Git LFS (see .gitattributes), but Cursor's
+# AI / @-mention only sees the LFS pointer file, which is useless context.
+*.nsys-rep
+*.qdrep
+*.qdrep-nsys
+*.qdstrm
+*.ncu-rep
+*.sqlite
+
+# OS junk.
+.DS_Store

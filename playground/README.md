@@ -22,7 +22,9 @@ For C/C++/CUDA, just `nvcc whatever.cu -o whatever && ./whatever`.
 
 ## Notes
 
-- `__pycache__/`, `.venv/`, `*.nsys-rep`, `*.ncu-rep`, `build/` etc. are
-  already in the repo `.gitignore`.
+- `__pycache__/`, `.venv/`, `build/` etc. are in the repo `.gitignore`.
+- Profile outputs (`*.nsys-rep`, `*.ncu-rep`, `*.qdrep*`, `*.sqlite`) are
+  tracked via **Git LFS** (see `.gitattributes`) — they are experiment data,
+  not throw-away build output. First clone needs `git lfs install` once.
 - When something here turns into a blog post, copy the relevant figures
   into `content/posts/<slug>/` and link back to this folder from the post.

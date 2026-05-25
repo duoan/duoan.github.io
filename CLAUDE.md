@@ -60,6 +60,41 @@ For multi-step tasks, state a brief plan:
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
 
+## Project-Specific Guidelines
+
+This repo = a Hugo blog (`content/posts/`) plus a free-form `playground/` for ML systems code. The principles above still apply; these are the project-specific facts that catch out new edits.
+
+### Layout
+
+- **`playground/` stays flat.** No framework, no `_template/`, no per-experiment scaffolding directories. Add files where they make sense at the time; reorganize only when it actually starts to hurt.
+- **No code under `content/`.** Hugo only renders `content/`. Source code lives in `playground/`. Figures a post embeds belong inside that post's page bundle (`content/posts/<slug>/`).
+- **Don't modify `themes/PaperMod`** — it's an upstream git submodule. Theme overrides go in `layouts/` at the repo root.
+
+### Python
+
+- Deps live in the root `pyproject.toml`, managed by `uv`. Don't introduce `pip install`, `requirements.txt`, `poetry`, or `conda`.
+- `torch` is pinned to the `cu130` index via `[tool.uv.sources]` for Linux/Windows; macOS pulls CPU torch from PyPI.
+- Format and lint with `ruff` only (already wired into the editor). Don't add `black`, `isort`, or `flake8`.
+
+### CUDA / C++
+
+- Prefer the simplest build path:
+  - PyTorch-side: `torch.utils.cpp_extension.load_inline` in a single `.py`.
+  - Standalone: a single `.cu` + `nvcc foo.cu -o foo`.
+- Reach for `Makefile` / CMake only when custom flags or multiple translation units actually require it.
+- Format with `clang-format` (config at repo root).
+
+### Blog posts
+
+- New post = page bundle: `content/posts/<slug>/index.md` plus sibling figures (`*.svg`, `*.csv`). Reference figures by relative filename.
+- Frontmatter must include `title`, `date`, `tags`, `categories`, `draft`. Match the style of existing posts.
+- **Historical posts are immutable.** Don't update `cu128` → `cu130` or other version strings on old posts; they record the actual environment at writing time.
+
+### What goes where in git
+
+- **Don't commit**: Hugo build output (`public/`, `resources/`, `.hugo_build.lock`); Python caches (`.venv/`, `__pycache__/`, `.ruff_cache/`, `.pytest_cache/`).
+- **Commit via Git LFS** (see `.gitattributes`): profiler outputs (`*.nsys-rep`, `*.ncu-rep`, `*.qdrep*`, `*.qdstrm`, `*.sqlite`). These are experiment data, not throw-away artifacts — keep them. Don't move them into `.gitignore`.
+
 ---
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.

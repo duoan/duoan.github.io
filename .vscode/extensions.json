@@ -1,0 +1,11 @@
+{
+    "recommendations": [
+        "charliermarsh.ruff",
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-vscode.cpptools",
+        "nvidia.nsight-vscode-edition",
+        "tamasfe.even-better-toml",
+        "editorconfig.editorconfig"
+    ]
+}
