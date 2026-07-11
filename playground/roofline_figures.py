@@ -502,11 +502,109 @@ def train_sweep_figure(data: dict, out: Path) -> None:
     plt.close(fig)
 
 
+def cv_mfu_mbu_figure(data: dict, out: Path) -> None:
+    """MFU and MBU vs batch for ResNet-50 / ViT-B/16 (instrumented, not 6PT)."""
+    peak_f = data["peak_bf16_tflops"]
+    peak_b = data["peak_mem_tbs"] * 1000  # GB/s
+    i_peak = peak_f * 1e3 / peak_b
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.6), sharey=False)
+    colors = {"resnet50": "#4C72B0", "vit_b_16": "#C44E52"}
+    markers = {"infer": "o", "train": "s"}
+    labels = {"resnet50": "ResNet-50", "vit_b_16": "ViT-B/16"}
+
+    for ax, metric, ylabel, title in [
+        (
+            axes[0],
+            "mfu",
+            "MFU (%)",
+            f"MFU vs batch — {data['device']}",
+        ),
+        (
+            axes[1],
+            "mbu",
+            "MBU (%)",
+            f"MBU vs batch — {data['device']}",
+        ),
+    ]:
+        for m in data["models"]:
+            color = colors[m["name"]]
+            for phase in ("infer", "train"):
+                batches = [p["batch"] for p in m[phase]]
+                if metric == "mfu":
+                    ys = [100 * p["tflops"] / peak_f for p in m[phase]]
+                else:
+                    ys = [100 * p["gbs"] / peak_b for p in m[phase]]
+                ax.plot(
+                    batches,
+                    ys,
+                    marker=markers[phase],
+                    lw=1.8,
+                    color=color,
+                    ls="-" if phase == "infer" else "--",
+                    label=f"{labels[m['name']]} {phase}",
+                )
+        ax.set_xscale("log", base=2)
+        ax.set_xticks([1, 2, 4, 8, 16, 32, 64], ["1", "2", "4", "8", "16", "32", "64"])
+        ax.set_xlabel("Batch size")
+        ax.set_ylabel(ylabel)
+        ax.set_title(title)
+        ax.legend(fontsize=8, frameon=False, loc="lower right")
+
+    fig.suptitle(
+        f"Instrumented MFU/MBU (FlopCounterMode + module-IO bytes), I_peak≈{i_peak:.0f} FLOP/B",
+        fontsize=11,
+    )
+    fig.tight_layout()
+    fig.savefig(out / "cv_mfu_mbu.svg")
+    plt.close(fig)
+
+    # Companion: intensity vs batch, with ridge line
+    fig, ax = plt.subplots(figsize=(8.5, 4.8))
+    for m in data["models"]:
+        color = colors[m["name"]]
+        for phase in ("infer", "train"):
+            batches = [p["batch"] for p in m[phase]]
+            intens = [p["intensity"] for p in m[phase]]
+            ax.plot(
+                batches,
+                intens,
+                marker=markers[phase],
+                lw=1.8,
+                color=color,
+                ls="-" if phase == "infer" else "--",
+                label=f"{labels[m['name']]} {phase}",
+            )
+    ax.axhline(i_peak, color="#1f2933", ls=":", lw=1.2)
+    ax.annotate(
+        f"I_peak ≈ {i_peak:.0f}",
+        xy=(0.02, i_peak),
+        xycoords=("axes fraction", "data"),
+        ha="left",
+        va="top",
+        fontsize=9,
+        color="#475569",
+        xytext=(0, -4),
+        textcoords="offset points",
+    )
+    ax.set_xscale("log", base=2)
+    ax.set_yscale("log")
+    ax.set_xticks([1, 2, 4, 8, 16, 32, 64], ["1", "2", "4", "8", "16", "32", "64"])
+    ax.set_xlabel("Batch size")
+    ax.set_ylabel("Arithmetic intensity I (FLOP/B)")
+    ax.set_title(f"CV model intensity vs batch — {data['device']}")
+    ax.legend(fontsize=8.5, frameon=False, loc="lower right")
+    fig.tight_layout()
+    fig.savefig(out / "cv_intensity.svg")
+    plt.close(fig)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", type=Path, required=True)
     ap.add_argument("--decode-results", type=Path, default=None)
     ap.add_argument("--train-results", type=Path, default=None)
+    ap.add_argument("--cv-results", type=Path, default=None)
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
 
@@ -521,6 +619,8 @@ def main() -> None:
         decode_sweep_figure(json.loads(args.decode_results.read_text()), args.out)
     if args.train_results:
         train_sweep_figure(json.loads(args.train_results.read_text()), args.out)
+    if args.cv_results:
+        cv_mfu_mbu_figure(json.loads(args.cv_results.read_text()), args.out)
     print(f"wrote figures to {args.out}")
 
 

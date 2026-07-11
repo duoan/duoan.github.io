@@ -8,446 +8,305 @@ draft: false
 
 # Roofline: The First Step of Any Performance Optimization
 
-When you see MFU sitting at 20%, what's your first reaction?
+When MFU sits at 20%, most people open a profiler and hunt for a slow kernel. That often starts at the wrong layer. The first question is not *which kernel is hot* — it is *which ceiling you are hitting*: compute or memory bandwidth.
 
-Most people immediately reach for a profiler — hunt for the "slow kernel", look for bubbles in the timeline. But all of those reactions skip the single most important step in performance work: **figuring out which wall you actually hit**.
+## TL;DR
 
-## 1. The Step Everyone Skips
+- Every GPU has two hard ceilings: peak FLOP/s and peak bandwidth. Arithmetic intensity `I = FLOPs / Bytes` decides which one binds first.
+- MFU answers “are we compute-bound?” for training. MBU answers “are we bandwidth-bound?” for decode. Both are Roofline ratios, not vibes.
+- Shape matters more than op name: the same `matmul` can be compute-bound at `M=N=K=8192` and memory-bound at `M=1`. That is why training and decode feel like different worlds.
+- Count MFU/MBU by instrumentation (`FlopCounterMode` + bytes), not PaLM `6PT` — that formula is an LLM shortcut. ResNet / ViT work the same way as any other `nn.Module`.
+- Model-level Roofline is useful when traffic is homogeneous (decode, dense training GEMMs). It is misleading when time is dominated by a mix of memory-bound and compute-bound ops — then go per-op, then profiler.
+- Reproducible Modal measurements (ops, LLM decode/train sweeps, ResNet/ViT MFU·MBU) live in this page bundle; code in [`playground/roofline_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/roofline_modal.py).
 
-In deep learning performance work, the most expensive mistake isn't "failing to find the optimal solution". It's picking the wrong direction from the start.
+## The Most Expensive Mistake
 
-A real scenario:
+The costly failure mode in performance work is not missing the optimal kernel. It is optimizing in the wrong direction.
 
-> A dense model trains on A100s at 45% MFU. The team upgrades to H100s expecting a ~3× speedup. They get 1.5×, and MFU *drops* to 32%. Someone suspects the interconnect. Someone starts rewriting kernels. Someone blames the CUDA version. The real story: **the hardware changed, so the nature of the bottleneck changed.** Operators that were compute-bound on A100 got pushed into the bandwidth-bound regime on H100.
+A recurring upgrade story:
 
-This is not a one-off. New hardware keeps changing the rules of the game while most of us keep reasoning with the old ones.
+> Dense training on A100 at ~45% MFU. Move to H100 expecting ~3× from peak BF16. Wall-clock improves ~1.5×; MFU *falls* to ~32%. The team blames NCCL, CUDA, or “bad kernels.” The real change: **the ridge point moved.** Ops that sat on the A100 plateau were pushed onto the H100 slope.
 
-Roofline is the model that lets you see, at a glance, *which wall you're up against*. One 2D chart plus two ratios (MFU / MBU) answer two questions:
+Hardware keeps rewriting the binding constraint. Roofline is the cheapest way to see that before you spend a week in Nsight.
 
-1. Is this operator compute-bound or bandwidth-bound?
-2. How much headroom is left?
+## The Model in One Page
 
-This post explains the model, grounds it in numbers for A100 / H100 / B200, backs it with experiments you can reproduce on [Modal](https://modal.com) for a few cents, and ends with a decision procedure you can copy verbatim.
+Roofline (Williams, Waterman, Patterson, CACM 2009) says:
 
-## 2. Every Piece of Hardware Has Two Ceilings
-
-Roofline comes from Williams, Waterman, and Patterson's classic 2009 CACM paper. It was designed for multicore CPUs and later adopted wholesale by NVIDIA, LBNL, and Intel for GPUs and HPC.
-
-Its core insight fits in one sentence:
-
-> Every piece of hardware has exactly two ceilings — compute (FLOP/s) and memory bandwidth (B/s). How fast a piece of code runs depends on which ceiling it hits first.
-
-A traditional profiler tells you "this kernel took X milliseconds". It does *not* tell you: during those X milliseconds, was the GPU computing, or waiting for data?
-
-Roofline is the minimal model that separates those two things.
-
-## 3. Three Concepts
-
-### Arithmetic intensity `I` — a property of the algorithm
+> Achieved performance ≤ min(`I × PeakBW`, `PeakFLOPS`).
 
 ```text
-I = FLOPs / Bytes moved to and from memory        [FLOP/B]
+I = FLOPs / Bytes_to_and_from_DRAM     [FLOP/B]
+I_peak = PeakFLOPS / PeakBW
+P(I) = min(I × PeakBW, PeakFLOPS)
 ```
 
-The key point: **`I` is an intrinsic property of the algorithm/operator, independent of hardware.** Fix the algorithm and the precision, and `I` is fixed. Move the same GEMM to an H100 and `I` doesn't change — the *walls around it* move.
-
-Classic examples (FP32):
-
-| Operation | FLOPs | Bytes | I (FLOP/B) |
-|---|---|---|---|
-| SAXPY: `y = a*x + y` | 2N | 12N | 0.17 |
-| Dot product: `sum(x*y)` | 2N | 8N | 0.25 |
-| GEMM: `C = A·B`, square N×N | 2N³ | 12N² | N/6 |
-
-The interesting bit: GEMM's intensity grows *linearly* with the matrix edge. That's why large matmuls are naturally compute-bound while element-wise ops are forever memory-bound — not because "the optimization wasn't done right", but because the algorithm dictates it.
-
-NVIDIA's docs call this the *ops-to-byte ratio*; same thing.
-
-### Performance ceiling `P` — the roof drawn by the hardware
-
-```text
-P(I) = min(I × PeakBandwidth, PeakFLOPS)
-```
-
-Two line segments:
-
-- **Left segment (the slope):** bandwidth is the bottleneck; performance rises linearly with `I`.
-- **Right segment (the plateau):** compute is the bottleneck; the ceiling is peak FLOP/s.
-
-Where they meet is the **ridge point**:
-
-```text
-I_peak = PeakFLOPS / PeakBandwidth
-```
-
-Comparing an operator's `I` with `I_peak` classifies the bottleneck:
-
-| Test | Bottleneck | Optimization direction |
-|---|---|---|
-| `I < I_peak` | memory-bound (slope) | raise `I`: fusion, reuse, fewer memory trips |
-| `I > I_peak` | compute-bound (plateau) | raise throughput: TensorCores, lower precision, parallelism |
-| `I ≈ I_peak` | balanced | do both, ranked by ROI |
-
-### One chart, one glance
+- **`I` is mostly an algorithm/shape property** (and precision). Moving the same GEMM to a new GPU does not change `I`; it moves the roof around the point.
+- Left of `I_peak`: memory-bound — raise reuse / fuse / cut traffic.
+- Right of `I_peak`: compute-bound — Tensor Cores, lower precision, better tiling / shapes.
+- Near `I_peak`: both matter; pick by ROI.
 
 ![The Roofline model: two ceilings, one ridge point](roofline_concept.svg)
 
-How to read it:
+Utilization is simply measured rate ÷ the roof height at that `I`. A profiler reports milliseconds; Roofline asks whether those milliseconds were spent computing or waiting on DRAM.
 
-1. Take the operator's `I`, place it on the x-axis.
-2. Go straight up until you hit the roof.
-3. That height is the operator's *theoretical* ceiling on this hardware.
-4. Measured performance ÷ ceiling = utilization.
+Classic FP32 intensities:
 
-That's the whole model.
+| Operation | FLOPs | Bytes | I |
+|---|---|---|---|
+| SAXPY | 2N | 12N | 0.17 |
+| Dot | 2N | 8N | 0.25 |
+| Square GEMM N×N | 2N³ | 12N² | N/6 |
 
-## 4. Modern GPUs: Where Is the Roof?
+GEMM’s `I` scales with `N`. Large matmuls are *structurally* compute-bound; elementwise ops are *structurally* memory-bound. That is not a failed optimization — it is the algorithm.
 
-Numbers from NVIDIA datasheets (theoretical peaks, dense — no sparsity):
+## The Ridge Keeps Moving Right
 
-| GPU | Peak FLOPS (BF16) | HBM bandwidth | I_peak (BF16) |
+Dense datasheet peaks (no sparsity):
+
+| GPU | Peak BF16 | Bandwidth | I_peak (BF16) |
 |---|---|---|---|
 | V100 SXM2 | 125 TFLOPS | 900 GB/s | ~139 |
 | A100 SXM 80GB | 312 TFLOPS | 2039 GB/s | ~153 |
 | H100 SXM | 989 TFLOPS | 3.35 TB/s | ~295 |
 | H200 SXM | 989 TFLOPS | 4.8 TB/s | ~206 |
-| B200 (Blackwell) | 2250 TFLOPS | 8 TB/s | ~281 |
+| B200 | 2250 TFLOPS | 8 TB/s | ~281 |
 | GB200 NVL72 | 2500 TFLOPS/GPU | 8 TB/s | ~312 |
-
-This one table captures the central tension of five years of GPU evolution — easier to see as a picture:
 
 ![Compute grows faster than bandwidth, so the ridge point drifts right](gpu_evolution.svg)
 
-> **Compute is growing far faster than bandwidth.** Since V100, peak BF16 compute has grown 18× while bandwidth grew 8.9×. The ridge point moved from 139 (V100) to 295 (H100) to nearly 300 (B200). The "memory-bound" territory keeps expanding; more and more operators get pushed onto the slope.
+Since V100, BF16 compute grew ~18× while bandwidth grew ~8.9×. The ridge moved from ~139 to ~295 on H100. More of the operator zoo sits on the slope every generation.
 
-That single trend explains why FlashAttention, `torch.compile`, and FP8 GEMMs have been promoted so hard in recent years — they're all doing the same thing: **pushing an operator's `I` back to the right of the ridge point.**
+That is the shared story behind FlashAttention, aggressive fusion / `torch.compile`, and FP8 GEMMs: **raise effective `I` or stop pretending low-`I` work can drink peak FLOPS.**
 
-One counter-intuitive fact about FP8: H100's FP8 peak is 1979 TFLOPS, so `I_peak(FP8) ≈ 591`. Halving the precision doubles compute but leaves bandwidth unchanged — nearly every element-wise op gets shoved to the far left of the slope. That's why FP8 only pays off for large GEMMs.
+FP8 makes the ridge *worse* for non-GEMM work: H100 FP8 peak ~1979 TFLOPS ⇒ `I_peak(FP8) ≈ 591` with the same HBM. Elementwise ops get shoved further left. FP8 is a GEMM/tooling bet, not a free lunch for the whole graph.
 
-## 5. MFU: The Metric for Training
+## How to Score: MFU and MBU
 
-MFU (Model FLOPs Utilization) comes from Google's PaLM paper:
-
-```text
-MFU = (model FLOPs per second, achieved) / (peak FLOPs per second, hardware)
-```
-
-Note the denominator is a *rate* — FLOP/s over FLOP/s, not "total FLOPs per step".
-
-**How do you estimate FLOPs per step?**
-
-For a Transformer LLM, the standard approximation is `6·P·T` (Kaplan 2020 / Chinchilla):
-
-- `P`: trainable parameters
-- `T`: tokens per step (batch × sequence length)
-- The factor 6: forward costs `2PT`, backward costs `4PT` (one `2PT` each for parameter grads and activation grads)
-
-Long sequences need an attention correction term:
+The definitions are model-agnostic. The *counting method* is what people get wrong.
 
 ```text
-FLOPs/step ≈ 6·P·T + 12·L·H·Q·T·S      (L layers, H heads, Q head dim, S seq len)
+MFU = (measured FLOPs / wall_time) / PeakFLOPS
+MBU = (measured Bytes / wall_time) / PeakBW
+I   = measured FLOPs / measured Bytes
 ```
 
-Below seq 1024 the second term is negligible; above 4096 it can be 30–50% of the total, and plain `6PT` will underestimate.
+**Do not start from PaLM’s `6·P·T`.** That is a *shortcut for dense Transformer LLMs*, not a universal FLOP counter. ResNet, ViT, U-Net, diffusion backbones — none of them owe you a closed form. The portable method is instrumentation:
 
-**Reference MFU levels from public training reports:**
+1. **FLOPs** — `torch.utils.flop_counter.FlopCounterMode` (or fvcore). Run the real forward, or forward+backward, under the same autocast you use in production.
+2. **Bytes** — either DRAM bytes from Nsight Compute, or a *module-boundary* estimate: for every leaf module, charge parameter reads + input/output tensor sizes. The estimate over-counts when activations stay in cache / get fused, and under-counts workspace invisible at boundaries. It is still the right default when you do not have `ncu`.
+3. **Time** — median CUDA events around the same region you counted.
 
-| Run | Hardware | MFU |
-|---|---|---|
-| PaLM 540B | TPU v4 | 46.2% |
-| GPT-3 175B | V100 | ~21.3% |
-| Megatron-Turing NLG 530B | A100 | 30.2% |
-| Llama 2 70B | A100 | ~40–45% |
-| DeepSeek-V3 671B (MoE) | H800 | ~40% |
+```python
+from torch.utils.flop_counter import FlopCounterMode
 
-Mapped to your own runs:
+with FlopCounterMode(display=False) as fcm:
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        model(x)          # or: loss = model(x).sum(); loss.backward()
+flops = fcm.get_total_flops()
+# bytes: leaf-module hooks (see playground/roofline_modal.py::cv)
+# time:  CUDA event median of the same callable
+mfu = (flops / seconds) / peak_flops
+mbu = (nbytes / seconds) / peak_bw
+```
 
-| MFU | Status | Notes |
-|---|---|---|
-| < 20% | something is clearly wrong | communication, CPU, or dataloader bottleneck |
-| 20–35% | mediocre | obvious headroom |
-| 35–50% | good | mainstream range for large LLM training |
-| > 50% | excellent | only carefully tuned dense training gets here |
-| > 60% | rare | usually extreme packing + custom kernels |
+### LLM special case (optional shortcut)
 
-**MFU vs HFU.** The PaLM paper also defines HFU (Hardware FLOPs Utilization), which counts gradient-checkpointing recompute FLOPs in the numerator:
-
-- MFU: only the FLOPs the model *should* do — measures **algorithmic efficiency**
-- HFU: includes recompute — measures **whether the hardware is busy**
-
-HFU typically runs ~33% higher than MFU. MFU is the one that matters. When someone reports "60% MFU", the first question to ask is: *does that include recompute?*
-
-## 6. MBU: The Metric for Inference
-
-MBU (Model Bandwidth Utilization) was popularized by Databricks / MosaicML:
+For *dense* Transformer LLMs only, FLOPs/step ≈ `6·P·T` (Kaplan / Chinchilla): forward `2PT`, backward `4PT`. Long sequences need the attention term or you **understate FLOPs and inflate MFU**:
 
 ```text
-MBU = (achieved memory bandwidth) / (peak memory bandwidth)
+FLOPs/step ≈ 6·P·T + 12·L·H·Q·T·S
 ```
 
-Why does inference care about MBU more than MFU? Because in the decode phase at batch=1, almost all the time goes to reading parameters out of HBM — MBU directly determines tokens/s.
+Public LLM ballparks still use this shortcut: PaLM 540B ~46% on TPU v4; Llama-2 70B ~40–45% on A100. Below ~20% on a healthy dense LLM job, look for data / launch / communication first.
 
-**A concrete calculation.** Llama-70B (`P = 7×10¹⁰`) doing batch=1 BF16 decode on an H100 (3.35 TB/s):
+**MFU vs HFU:** HFU counts checkpoint recompute in the numerator. HFU = “is the GPU busy?”; MFU = “useful model work.” Ask whether a quoted “60% MFU” includes recompute.
+
+### Decode → MBU (LLM serving)
+
+Batch-1 BF16 decode is dominated by streaming weights. Llama-70B on H100:
 
 ```text
-bytes per token ≈ 2 × 7e10        = 140 GB
-time per token  ≥ 140 GB / 3.35 TB/s ≈ 41.8 ms
-ceiling         ≈ 24 tokens/s
+bytes/token ≈ 2·P = 140 GB
+t_token ≥ 140 GB / 3.35 TB/s ≈ 41.8 ms  →  ≤ ~24 tok/s
 ```
 
-That's the ceiling for *all* inference optimization on that setup. Without speculative decoding, continuous batching, or quantization, no kernel wizardry breaks 24 tok/s — because just *moving the weights from HBM to the compute units* takes 41.8 ms.
+That bound is physical. Speculative decoding, continuous batching, and quantization change the *bytes* or the *effective batch* — they do not violate Roofline. Good serving stacks often land in the 60–80% MBU band; below ~40% usually means launch / CPU / graph overhead.
 
-**Reference MBU levels:**
+## Operator Intensities (Keep This Table)
 
-| MBU | Status |
-|---|---|
-| < 40% | clear kernel-launch / CPU bottleneck |
-| 40–60% | mediocre |
-| 60–80% | good — the vLLM / TensorRT-LLM target range |
-| > 80% | excellent |
+Horace He’s framing still stands: time splits into **compute, memory, overhead**. Roofline covers the first two. Overhead (eager launches, Python, host sync) is a third wall — high when both MFU and MBU are low.
 
-## 7. Arithmetic Intensity of Common DL Operators
-
-Horace He's [Making Deep Learning Go Brrrr From First Principles](https://horace.io/brrr_intro.html) gives the sharpest framing: every DL program's time is divided among three costs — **compute, memory, overhead**. Roofline covers the first two; overhead (kernel launches, Python, graph capture) must be handled separately.
-
-This table is worth keeping around:
-
-| Operator | I (BF16, FLOP/B) | Verdict on H100 | Optimization |
+| Operator | I (BF16, approx.) | On H100 | Lever |
 |---|---|---|---|
-| Element-wise (Add, GELU) | 0.5–1.5 | Memory-bound | fusion |
-| LayerNorm / RMSNorm | ~1 | Memory-bound | fused kernels (Apex/Triton) |
-| Softmax | ~0.75 | Memory-bound | online softmax / FA fusion |
-| Attention (vanilla) | ~64 | Memory-bound | FlashAttention |
-| Attention (FlashAttention) | ~200 | near balanced | already optimized |
-| GEMM (M=N=K=4096) | ~1365 | Compute-bound | TensorCore alignment, FP8 |
-| GEMM (decode, M=1, K=N=4096) | ~2 | Memory-bound | quantization, continuous batching |
-| Embedding lookup | ~0 | Memory-bound | low-precision storage, caching |
+| Elementwise | 0.5–1.5 | memory | fuse |
+| RMSNorm / Softmax | ~1 | memory | fused kernels |
+| Vanilla attention | tens | memory | FlashAttention |
+| FlashAttention | hundreds–thousands* | near/on plateau | already the right direction |
+| GEMM 4096³ | ~10³ | compute | TC alignment, FP8 |
+| GEMM M=1 (decode) | ~1–2 | memory | batch, quantize |
+| Embedding | ~0 | memory | cache / low-precision storage |
 
-Look at the two GEMM rows. Both are "GEMM", but the shapes differ, so one is strongly compute-bound and the other strongly memory-bound. **This is the root cause of "training is compute-bound, decode is memory-bound"** — not a difference in operator kind, but a difference in shape that changes `I` entirely.
+\*Depends on how you count SRAM-resident intermediates; the *point* is FA collapses HBM traffic from O(S²) to O(S) at nearly constant FLOPs — “raise `I`” and “cut memory traffic” are the same move.
 
-**The right way to think about FlashAttention.** Vanilla attention writes the S×S score matrix to HBM and reads it back for softmax — HBM traffic is O(S²). FlashAttention keeps that matrix in SRAM — HBM traffic drops to O(S). The FLOPs don't change at all; the *bytes* do. That's why it saves memory and time simultaneously: "reducing memory traffic" and "raising `I`" are the same statement.
+The two GEMM rows are the root of “training feels compute-bound, decode feels memory-bound”: **same op family, different shapes, different `I`.**
 
-## 8. Measuring It Yourself: Experiments on Modal
+## Experiments
 
-Theory tables are nice, but the whole point of Roofline is that it's *checkable with a stopwatch*. I wrote a small benchmark that runs every operator from the table above on a cloud GPU via [Modal](https://modal.com), counts FLOPs and bytes analytically, and drops each op onto the roofline. Full code: [`playground/roofline_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/roofline_modal.py) and [`playground/roofline_figures.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/roofline_figures.py).
-
-The skeleton is minimal — Modal makes "run this function on a GPU" a decorator:
-
-```python
-import modal
-
-app = modal.App("roofline")
-image = modal.Image.debian_slim(python_version="3.12").pip_install("torch")
-
-@app.function(gpu="A10G", image=image, timeout=1200)
-def bench() -> dict:
-    import torch
-
-    def time_op(fn, warmup=10, iters=50):
-        """Median wall time of fn() in seconds, via CUDA events."""
-        for _ in range(warmup):
-            fn()
-        torch.cuda.synchronize()
-        times = []
-        for _ in range(iters):
-            start = torch.cuda.Event(enable_timing=True)
-            end = torch.cuda.Event(enable_timing=True)
-            start.record(); fn(); end.record()
-            torch.cuda.synchronize()
-            times.append(start.elapsed_time(end) / 1e3)
-        return sorted(times)[len(times) // 2]
-    ...
-```
-
-For each op I record measured seconds plus *analytic* FLOPs and bytes, e.g.:
-
-```python
-# Elementwise add: 1 FLOP/elem, read 2 elems, write 1
-s = time_op(lambda: torch.add(x, y))
-record("Elementwise add", s, flops=n, bytes_moved=3 * n * esize)
-
-# Decode-shaped GEMV: M=1, K=N=8192 — same "GEMM", wildly different I
-s = time_op(lambda: a @ b)   # a: (1, 8192), b: (8192, 8192)
-record("decode GEMV", s, flops=2 * k * k, bytes_moved=(k * k + 2 * k) * esize)
-```
-
-Then:
+All scripts: [`playground/roofline_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/roofline_modal.py), figures: [`playground/roofline_figures.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/roofline_figures.py).
 
 ```bash
-uv run modal run playground/roofline_modal.py
+uv run modal run playground/roofline_modal.py            # per-op
+uv run modal run playground/roofline_modal.py::decode    # model-level decode
+uv run modal run playground/roofline_modal.py::train     # model-level fwd+bwd
+uv run modal run playground/roofline_modal.py::cv        # ResNet-50 / ViT-B/16 MFU·MBU
 ```
 
-My Modal account is on the free tier, which doesn't offer H100s, so the numbers below come from an **NVIDIA A10G** (datasheet: 70 TFLOPS BF16 dense, 600 GB/s GDDR6, so `I_peak ≈ 117`). The script takes `ROOFLINE_GPU=H100` if your account has one — the *shape* of the results is the same on any GPU; only the ridge point moves.
+**Setup.** Modal free tier here → **A10 / A10G-class** GPUs, not H100. Op sweep figures use an A10G datasheet roof (70 TFLOPS BF16, 600 GB/s, `I_peak ≈ 117`). Decode/train/CV sweeps landed on an A10 (125 TFLOPS BF16, same 600 GB/s, `I_peak ≈ 208`). The *shapes* transfer; only the ridge moves on H100. Timing is median CUDA-event walls. Per-op FLOPs/bytes are analytic; CV FLOPs come from `FlopCounterMode`; CV bytes from leaf-module IO (+ bwd weight/grad traffic for train). BF16 matmul uses FP32 accumulation where relevant.
 
-### The measured roofline
+Measurement idea (not the full harness):
+
+```python
+# Analytic I + measured time → point on the roof
+s = time_op(lambda: a @ b)  # CUDA events, median
+record(flops=2 * m * n * k, bytes=(m*k + k*n + m*n) * 2, seconds=s)
+```
+
+### Per-op: theory shows up on a stopwatch
 
 ![Measured roofline on an NVIDIA A10G](roofline_measured.svg)
 
-Everything the theory said shows up in the data (BF16 throughout):
-
-| Op | I (FLOP/B) | Achieved | Utilization |
+| Op | I | Achieved | Read |
 |---|---|---|---|
-| memcpy 1 GiB (bandwidth ceiling) | — | 472 GB/s | 79% of 600 GB/s |
-| GEMM 8192³ (compute ceiling) | 2731 | 65.9 TFLOP/s | 94% of 70 TFLOPS |
-| Elementwise add | 0.17 | 477 GB/s | **79% MBU**, 0.08 TFLOP/s |
-| GELU | 2.5 | 477 GB/s | 79% MBU |
-| RMSNorm 8192×8192 | 1.0 | 315 GB/s | 53% MBU |
-| Softmax 8192×8192 | 1.25 | 476 GB/s | 79% MBU |
-| GEMM M=1, K=N=8192 (decode) | ~1.0 | 438 GB/s | **73% MBU**, 0.44 TFLOP/s |
-| Attention vanilla, S=4096 | 31.5 | 3.2 TFLOP/s | 4.5% MFU |
-| FlashAttention, S=4096 | 2048 | 61.4 TFLOP/s | 88% MFU |
+| memcpy ceiling | — | 472 GB/s | ~79% of 600 GB/s |
+| GEMM 8192³ | 2731 | 65.9 TFLOP/s | ~94% of 70 TFLOPS |
+| Elementwise add | 0.17 | 477 GB/s | on the slope |
+| Decode GEMV M=1 | ~1 | 0.44 TFLOP/s, 438 GB/s | 73% MBU, not a “slow kernel” |
+| Vanilla attn S=4096 | ~32 | 3.2 TFLOP/s | HBM-bound scores |
+| FlashAttention S=4096 | ~2048 | 61.4 TFLOP/s | ~88% of peak; ~19× wall-clock |
 
-Three things worth staring at:
+Three takeaways:
 
-1. **The memory-bound ops sit exactly on the slope.** Add, GELU, softmax, and the decode GEMV all achieve ~440–477 GB/s — pinned to the measured bandwidth roof — while their FLOP/s are pitiful. They are *done*. No kernel tuning will make `torch.add` faster; only fusion (fewer trips to memory) changes anything.
-2. **The decode GEMV is the punchline of the whole post.** Same `matmul` call as the 8192³ GEMM, but at M=1 it lands at `I ≈ 1` and runs at 0.44 TFLOP/s — a **150× gap** from the square GEMM — while achieving 73% MBU. The kernel is not slow. The *shape* is bandwidth-starved.
-3. **FlashAttention vs vanilla is a 19× wall-clock gap** on this shape (S=4096: 86.6 ms → 4.5 ms) with identical FLOPs. Vanilla attention drags the S² score matrix through HBM about four times; FlashAttention keeps it in SRAM, moving its intensity from ~32 to ~2048 — from the slope to the plateau, at 88% MFU.
-
-### Same op, different shape
+1. **Memory-bound ops pin bandwidth and refuse FLOPS.** Tuning `add` is theater; fusion is the only lever.
+2. **Decode GEMV vs square GEMM is ~150× in TFLOP/s for the same `matmul` API.** Shape, not kernel quality.
+3. **FlashAttention moves the same FLOPs from the slope onto the plateau** by cutting bytes.
 
 ![GEMM throughput vs shape](gemm_shape_sweep.svg)
 
-The GEMM sweep makes the "intensity is a property of the shape" point directly: at 256³ the GPU manages 0.9 TFLOP/s — barely 1% of peak — and only approaches the roof from 2048³ onward. Datasheet peaks require shapes the kernel likes.
+Even within “square GEMM,” 256³ is ~1% of peak; the roof only appears once tiles fill the machine. Whitepaper peaks assume shapes the library likes.
 
-### Does a *model-level* roofline make sense?
+### Model-level: when averaging is honest
 
-A fair objection at this point: everything above is per-operator. Can you put a whole *model* on the roofline?
+A whole-model “average `I`” is dangerous when GEMMs dominate FLOPs but norms/softmax dominate time. Then Roofline must be applied **per hot op**, and a profiler tells you *which* ops are hot.
 
-In general, no — and it's worth understanding why. A model is a mixture of operators, and a whole-model "average intensity" (total FLOPs ÷ total bytes) is dominated by the big GEMMs, while wall-clock time can be dominated by memory-bound ops. Averaging hides exactly the distinction Roofline exists to make. For a heterogeneous op mix, the tools are the per-op table above and a profiler.
+It *is* honest when traffic is dominated by a single pattern:
 
-But there is one case where model-level roofline is not just valid but *the sharpest tool available*: **LLM decode**. Every decode step reads every weight exactly once (2 bytes/param in BF16) and does ~2 FLOPs per parameter *per sequence in the batch*. So for the whole model:
+**Decode.** One step reads weights once (~`2P` bytes BF16) and does ~`2P·B` FLOPs:
 
 ```text
-I_model ≈ (2 · P · B) / (2 · P) = B      — arithmetic intensity IS the batch size
+I_decode ≈ B
 ```
 
-The x-axis of the roofline becomes the batch size, and the model predicts something very concrete: throughput should grow *linearly and almost for free* with batch until `B ≈ I_peak`, then flatten into the compute roof. That predicted knee is the **critical batch size**, and it's a number a profiler cannot hand you — a profiler describes the run you did, not the run you should be doing.
-
-I tested this with a 1.4B-parameter MLP-only model (16 blocks of 4096 → 11008 → 4096, BF16) on Modal, sweeping the decode batch from 1 to 512 (`modal run playground/roofline_modal.py::decode`). This run landed on an NVIDIA A10 (125 TFLOPS BF16 / 600 GB/s ⇒ critical batch ≈ 208):
+Batch *is* intensity. Throughput should rise almost linearly until `B ≈ I_peak`, then flatten. That knee is the **critical batch** — a number a single profile cannot invent.
 
 ![Model-level roofline: decode throughput vs batch size](decode_batch_sweep.svg)
 
-The measured curve does exactly what the napkin math says:
+On A10 (critical batch ≈ 208), 1.4B MLP decode:
 
-- **Batch 1:** 166 tok/s against a bandwidth ceiling of `600 GB/s ÷ 2.9 GB of weights ≈ 208 tok/s` — 80% MBU before writing a single line of custom code.
-- **Batch 1 → 128:** throughput grows 90× while per-step latency only rises from 6.0 ms to 8.5 ms. Batching is nearly free — the weights are being read anyway; extra sequences ride along.
-- **Batch 128 → 512:** the curve bends onto the plateau. 4× more batch buys only 1.5× more throughput, and latency now grows 2.7×. The free lunch is over; you've crossed the ridge.
+- Batch 1: 166 tok/s vs ~208 tok/s bandwidth ceiling (~80% MBU).
+- 1→128: ~90× throughput; step time 6.0→8.5 ms — batching is nearly free.
+- 128→512: 4× batch → ~1.5× throughput; latency climbs — past the ridge.
 
-**What about training?** Then "model-level" means forward *plus* backward, and the same accounting still works — it's just the MFU calculation from section 5 in disguise. FLOPs per step become `6·P·T` (forward `2PT`, backward `4PT`), while weight traffic stays `O(P)`: read the weights in forward, read them again in backward, write gradients, touch optimizer state. So:
+**Training (LLM-shaped stand-in).** For this MLP, the LLM shortcut `6P·T` is intentional — same accounting as a dense Transformer without attention. Weight traffic ≈ `6P` bytes BF16 (fwd read, bwd read, grad write):
 
 ```text
-decode:    I ≈ 2PB / 2P  = B          — intensity is the batch size
-training:  I ≈ 6PT / kP  ∝ T          — intensity is tokens per step
+I_train ≈ T
 ```
 
-`T` in real training is 10⁵–10⁷ tokens per step, which puts training's model-level intensity far to the right of any ridge point. That's the napkin derivation of "training is naturally compute-bound, decode is naturally memory-bound" — and of why the right lens is MFU for training but MBU for decode.
-
-Same model, same GPU, but now each step is `forward + backward` (`modal run playground/roofline_modal.py::train`), sweeping tokens/step `T` from 1 to 4096:
+Real LLM training uses huge `T`, so the *aggregate* step sits on the compute roof — which is why MFU is the right headline metric. Same model, same GPU, sweeping `T`:
 
 ![Model-level roofline: training throughput vs tokens per step](train_tokens_sweep.svg)
 
-The shape mirrors decode, but the accounting changes because backward triples weight traffic (read in fwd, read again in bwd, write grads):
+- T=1: 53 tok/s — ~3× slower than decode batch=1; three weight traversals vs one.
+- 1→128: ~97× throughput; step time barely moves — still on the slope.
+- 1024→4096: plateau ~8k tok/s, ~70 TFLOP/s → **~56% MFU** on this A10. Production `T` is far larger; you live on the plateau and ask *how close*, not *which wall*.
 
-- **T = 1:** 53 tok/s and 0.46 TFLOP/s — roughly 3× slower than the decode run at batch = 1 (166 tok/s), because the same weights traverse HBM three times instead of once. Still on the slope; MBU-dominated.
-- **T = 1 → 128:** throughput climbs 97× while step time only goes from 19 ms to 25 ms. Extra tokens are nearly free — exactly the `I ∝ T` prediction.
-- **T = 1024 → 4096:** the curve bends onto the compute plateau at ~8,000 tok/s and ~70 TFLOP/s — **56% MFU** on this A10 (125 TFLOPS datasheet peak). Real LLM training runs at `T` two to four orders of magnitude larger, so it lives on this plateau; the question is how close to the roof you are, not which wall you hit.
+Aggregate compute-bound does **not** mean every op is. Norms and softmax still sit on the slope; that is why fusion and FlashAttention still matter inside an “MFU-healthy” train job.
 
-Note the same caveat applies in both directions: this holds at the *aggregate* level, while individual memory-bound ops (norms, softmax, activations) inside the step still live on the slope — which is exactly what the per-op section was for.
+### CV models: MFU/MBU without a closed form
 
-So the answer to "model-level or profiler?" is: **they answer different questions.** The model-level roofline is a *forward-looking* calculation — it tells you the ceiling, the critical batch, and whether an optimization *can possibly* help, before you run anything. The profiler is *backward-looking* — it tells you where the time actually went in the run you made, which is what you need when the model is a heterogeneous mix and the aggregate numbers stop being trustworthy. Napkin roofline first, per-op roofline second, profiler third.
+ResNet-50 and ViT-B/16 have no honest `6PT`. The CV sweep (`::cv`) uses the portable recipe above: `FlopCounterMode` for FLOPs, leaf-module IO (+ bwd weight/grad bytes for train) for traffic, CUDA-event medians for time. FP32 master weights, BF16 autocast — the same pattern most training stacks use.
 
-## 9. The Decision Procedure
+![Instrumented MFU and MBU vs batch for ResNet-50 and ViT-B/16](cv_mfu_mbu.svg)
 
-Given a piece of code, the standard flow:
+![Arithmetic intensity vs batch, with the A10 ridge](cv_intensity.svg)
+
+At batch 64 on A10 (`I_peak ≈ 208`):
+
+| Model | Phase | I | MFU | MBU | img/s |
+|---|---|---|---|---|---|
+| ResNet-50 | infer | 63 | 12% | 41% | 1896 |
+| ResNet-50 | train | 182 | 12% | 13% | 589 |
+| ViT-B/16 | infer | 236 | 26% | 23% | 941 |
+| ViT-B/16 | train | 664 | 28% | 9% | 325 |
+
+What to read:
+
+1. **ResNet inference sits left of the ridge** (`I ≈ 63 < 208`). MBU rises with batch and tops out near 40%; MFU stays low. This is a bandwidth-leaning CNN: BN/ReLU/small convolutions keep average intensity modest. Fusing and channels-last / efficient BN matter more than “more Tensor Cores.”
+2. **ViT training crosses the ridge** (`I ≈ 664`). MBU falls while MFU climbs — classic compute-side behavior as matmul-heavy blocks amortize weight traffic over larger batches.
+3. **Both MFU and MBU are modest in absolute terms** on this eager torchvision path. That is Shape C contamination (Python / launch / unfused eager graph), not a claim that ResNet is “broken.” `torch.compile` or a fused training stack would move the points up without changing the *relative* ResNet-vs-ViT story.
+4. **Same method, any model.** Swap in U-Net or a detector head; the counter does not care. LLM `6PT` is convenience, not a prerequisite for Roofline.
+
+**Roofline vs profiler.** Roofline is forward-looking: ceilings, critical batch / critical `T`, whether an idea can help. A profiler is backward-looking: where time went in the run you already made. Order: napkin Roofline → instrumented MFU/MBU → per-op Roofline → profiler.
+
+## A Playbook
 
 ```text
-Step 1  Measure: get achieved performance
-  ├─ time: nsys / torch.profiler / triton.testing.do_bench
-  └─ torch.cuda.synchronize() around the timed region
-
-Step 2  Compute: derive I
-  ├─ count FLOPs: 6PT formula or fvcore
-  └─ count Bytes: 2P-per-token formula or nsys memory profile
-
-Step 3  Look up: hardware I_peak (matching precision!)
-
-Step 4  Classify: I vs I_peak
-  ├─ I < I_peak / 2  → strongly memory-bound
-  ├─ I ≈ I_peak      → balanced
-  └─ I > I_peak × 2  → strongly compute-bound
-
-Step 5  Verify: compute MFU / MBU
-  ├─ MFU high → already compute-bound → precision / hardware-level work
-  ├─ MBU high → already memory-bound → fusion / reuse
-  └─ both low → CPU / launch / comms → torch.compile + CUDA Graphs
+1. Measure rate (CUDA events / nsys / do_bench; synchronize around the region)
+2. Count I:
+     FLOPs  ← FlopCounterMode / fvcore  (prefer this)
+             6PT / 2P only as an LLM napkin check
+     Bytes  ← ncu DRAM, or leaf-module IO estimate
+3. Look up I_peak for this GPU *and precision* (dense, not sparse)
+4. Classify:
+     I ≪ I_peak  → memory   → fuse / reuse / batch / quantize storage
+     I ≫ I_peak  → compute  → TC / precision / shape / sparsity
+     both MFU & MBU low → overhead → compile, CUDA Graphs, less Python
 ```
 
-Three canonical profile shapes:
+Canonical shapes:
 
-- **Shape A: high MFU, low MBU — compute-bound.** Directions: lower precision (BF16 → FP8), TensorCore alignment, sparsity, MoE. Typical: GEMM-heavy large-batch training.
-- **Shape B: high MBU, low MFU — memory-bound.** Directions: operator fusion, FlashAttention, KV-cache reuse, quantized storage. Typical: LLM decode.
-- **Shape C: both low — overhead-bound.** Directions: `torch.compile`, CUDA Graphs, fewer Python round-trips, bigger batches. Typical: an nsys timeline that's mostly blank — GPU idle → burst → idle → burst.
+| Shape | MFU | MBU | Typical fix |
+|---|---|---|---|
+| A | high | low | precision, TC, MoE/sparsity |
+| B | low | high | fusion, FA, KV reuse, quant |
+| C | low | low | compile, graphs, bigger work units |
 
-Horace He's description of shape C is hard to beat: *"You have a GPU doing nothing, then suddenly a burst of activity, then nothing again."*
+Shape C looks like Horace He’s timeline: idle → burst → idle.
 
-## 10. Five Traps
+## Traps
 
-**Trap 1: "Higher MFU is always better."** No. 40% MFU with stable training and robust hyperparameters can beat 60% MFU that requires padding every sequence to 4096 and burning half the compute. Watch *effective tokens/s*.
+1. **Maximizing MFU ≠ maximizing useful tokens/s.** Padding to a “fast” shape can raise MFU while lowering effective throughput.
+2. **Two roofs is a teaching model.** Hierarchical Roofline (L2, shared memory, NVLink, IB) matters for multi-GPU.
+3. **`I` independent of batch** is false for GEMM. Decode `M=1` collapses `I`.
+4. **Whitepaper FLOPS are conditional.** Dense vs sparse (A100 312 vs 624; H100 989 vs ~1979), TC on, aligned shapes. The GEMM sweep above is the shape condition made visible.
+5. **High MFU does not retire MBU.** Training headlines MFU; decode headlines MBU. Use both to avoid cargo-culting the wrong ratio.
 
-**Trap 2: "Roofline has exactly two segments."** The original model draws compute and DRAM only. Real hardware adds L2, shared memory, NVLink, InfiniBand — multiple roofs. LBNL's Hierarchical Roofline draws them all; distributed training needs that extension.
-
-**Trap 3: "I doesn't depend on batch size."** True for element-wise ops, completely false for GEMM. Decode means batch=1 means M=1 means `I` collapses. This is exactly why batching is the silver-bullet inference optimization.
-
-**Trap 4: "Peak FLOPS is the whitepaper number."** The whitepaper number is a theoretical peak *under conditions*: TensorCores enabled, shapes aligned (M/N/K multiples of 8/16), matching precision. And the sparse peaks (the ":2:4" numbers) require a sparsity pattern dense models don't have. A100's "624 TFLOPS BF16" is the sparse number — dense Roofline math uses 312. H100 likewise: 989, not 1979. The A10G sweep above makes the shape condition concrete: the same cuBLAS matmul spans 0.9 to 65.9 TFLOP/s depending only on its dimensions.
-
-**Trap 5: "MFU is high, so I can ignore MBU."** High MFU only says the kernels are busy. Training is MFU-dominated, inference is MBU-dominated — you need both to see the full picture.
-
-## 11. A Real Incident: Why Did H100 Make It Slower?
-
-Back to the opening scenario. MFU went from 45% on A100 to 32% on H100; wall-clock improved only 1.5× against a 3.2× compute upgrade.
-
-The Roofline diagnosis:
+## Closing the H100 Story
 
 ![A100 vs H100 rooflines: the same operator lands on different sides of the ridge](a100_vs_h100.svg)
 
-- A100: `I_peak ≈ 153`
-- H100: `I_peak ≈ 295` — the ridge point moved right by almost 2×
-- Operators that sat right of the A100 ridge (compute-bound) landed *left* of the H100 ridge (memory-bound) — the chart shows an operator at `I = 200` sitting on the A100 plateau but on the H100 slope
-- Bandwidth improved only 1.65× (2.0 → 3.35 TB/s) against 3.2× compute
+A100 `I_peak ≈ 153`, H100 ≈ 295. An op at `I = 200` sits on the A100 plateau and on the H100 slope. Compute rose ~3.2×; bandwidth only ~1.65×. The fix was not “find the NCCL bug” — it was raising effective `I` (FlashAttention, larger batches, FP8 GEMMs) to the right of the new ridge.
 
-The fix wasn't a bug hunt: FlashAttention, larger batches, FP8 GEMMs — pushing `I` back to the right of the new ridge.
+Roofline does not name the bug. It names the wrong hunt.
 
-That's the value of Roofline. It doesn't tell you "there's a bug here". It tells you **"the direction you were about to optimize in is wrong."**
+## What This Is Not
 
-## 12. Closing
-
-Roofline isn't a silver bullet. It can't explain communication bottlenecks in detail, doesn't cover recompilation overhead from dynamic shapes, and says nothing about load balancing across nodes.
-
-But it is the *starting point* of all performance work.
-
-Five minutes of Roofline before opening the profiler can save days or weeks of optimizing in the wrong direction. Because the most expensive mistake in performance engineering isn't failing to find a solution — it's acting before locating the problem.
+Roofline will not debug imbalance across ranks, dynamic-shape recompile storms, or PCIe/CPU feed issues in detail. Those need timelines. Use Roofline so you open the profiler with a hypothesis, not a panic.
 
 ## References
 
-**Roofline, original and extensions**
-
-- Williams et al., [Roofline: An Insightful Visual Performance Model for Multicore Architectures](https://dl.acm.org/doi/10.1145/1498765.1498785), CACM 2009
-- [LBNL Roofline Performance Model](https://crd.lbl.gov/divisions/amcr/computer-science-amcr/par/research/roofline/)
-- NVIDIA, [Deep Learning Performance Guide](https://docs.nvidia.com/deeplearning/performance/index.html)
-
-**MFU and training performance**
-
-- Chowdhery et al., [PaLM: Scaling Language Modeling with Pathways](https://arxiv.org/abs/2204.02311), 2022
-- Kaplan et al., [Scaling Laws for Neural Language Models](https://arxiv.org/abs/2001.08361), 2020
-- Hoffmann et al., [Training Compute-Optimal Large Language Models](https://arxiv.org/abs/2203.15556) (Chinchilla), 2022
-
-**MBU and inference performance**
-
-- Databricks / MosaicML, [LLM Inference Performance Engineering: Best Practices](https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices), 2023
-
-**Operator-level analysis**
-
-- Horace He, [Making Deep Learning Go Brrrr From First Principles](https://horace.io/brrr_intro.html)
-- Dao et al., [FlashAttention](https://arxiv.org/abs/2205.14135) / [FlashAttention-2](https://arxiv.org/abs/2307.08691)
-
-If this post was useful, forward it to the colleague currently staring at 20% MFU.
+- Williams et al., [Roofline](https://dl.acm.org/doi/10.1145/1498765.1498785), CACM 2009; [LBNL Roofline](https://crd.lbl.gov/divisions/amcr/computer-science-amcr/par/research/roofline/); NVIDIA [DL Performance Guide](https://docs.nvidia.com/deeplearning/performance/index.html)
+- Chowdhery et al., [PaLM](https://arxiv.org/abs/2204.02311); Kaplan et al., [Scaling Laws](https://arxiv.org/abs/2001.08361); Hoffmann et al., [Chinchilla](https://arxiv.org/abs/2203.15556)
+- Databricks / MosaicML, [LLM Inference Performance Engineering](https://www.databricks.com/blog/llm-inference-performance-engineering-best-practices)
+- Horace He, [Making Deep Learning Go Brrrr](https://horace.io/brrr_intro.html); Dao et al., [FlashAttention](https://arxiv.org/abs/2205.14135) / [FA-2](https://arxiv.org/abs/2307.08691)

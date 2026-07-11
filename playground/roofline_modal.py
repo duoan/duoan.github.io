@@ -8,10 +8,12 @@ both datasheet peaks and *measured* achievable peaks.
 Usage (from repo root)::
 
     uv run modal run playground/roofline_modal.py
+    uv run modal run playground/roofline_modal.py::decode
+    uv run modal run playground/roofline_modal.py::train
+    uv run modal run playground/roofline_modal.py::cv
     ROOFLINE_GPU=H100 uv run modal run playground/roofline_modal.py
 
-Writes ``playground/roofline_<gpu>_results.json`` locally when the remote
-run finishes. Figures are generated separately by ``roofline_figures.py``.
+Writes JSON under ``playground/``. Figures via ``roofline_figures.py``.
 """
 
 from __future__ import annotations
@@ -35,7 +37,7 @@ DATASHEET = {
 GPU = os.environ.get("ROOFLINE_GPU", "A10G")
 
 app = modal.App("roofline")
-image = modal.Image.debian_slim(python_version="3.12").pip_install("torch")
+image = modal.Image.debian_slim(python_version="3.12").pip_install("torch", "torchvision")
 
 
 @app.function(gpu=GPU, image=image, timeout=1200)
@@ -301,6 +303,148 @@ def train_sweep() -> dict:
     return {"device": device_name, "n_params": n_params, "points": points}
 
 
+def _tensor_nbytes(t) -> int:
+    import torch
+
+    if torch.is_tensor(t):
+        return t.numel() * t.element_size()
+    if isinstance(t, (tuple, list)):
+        return sum(_tensor_nbytes(x) for x in t)
+    if isinstance(t, dict):
+        return sum(_tensor_nbytes(x) for x in t.values())
+    return 0
+
+
+def _count_flops_and_bytes(model, run_fn) -> tuple[int, int]:
+    """General (non-6PT) accounting: FlopCounterMode + leaf-module IO bytes.
+
+    Bytes are a *module-boundary* estimate: each leaf module charges its
+    parameter reads plus input/output tensor sizes. That over-counts when
+    activations stay in cache / get fused, and under-counts workspace not
+    visible at module boundaries. It is still the right *portable* method
+    when you do not have ncu DRAM metrics — and it works for any nn.Module.
+    """
+    from torch.utils.flop_counter import FlopCounterMode
+
+    bytes_acc = {"n": 0}
+
+    def pre_hook(mod, inputs):
+        for p in mod.parameters(recurse=False):
+            bytes_acc["n"] += p.numel() * p.element_size()
+        bytes_acc["n"] += _tensor_nbytes(inputs)
+
+    def post_hook(mod, inputs, output):
+        bytes_acc["n"] += _tensor_nbytes(output)
+
+    handles = []
+    for mod in model.modules():
+        if any(mod.children()):
+            continue
+        handles.append(mod.register_forward_pre_hook(pre_hook))
+        handles.append(mod.register_forward_hook(post_hook))
+
+    with FlopCounterMode(display=False) as fcm:
+        run_fn()
+    flops = int(fcm.get_total_flops())
+
+    for h in handles:
+        h.remove()
+    return flops, int(bytes_acc["n"])
+
+
+@app.function(gpu=GPU, image=image, timeout=1800)
+def cv_sweep() -> dict:
+    """MFU/MBU for real CV models without LLM 6PT formulas.
+
+    FLOPs: torch.utils.flop_counter.FlopCounterMode (fwd, or fwd+bwd)
+    Bytes: leaf-module parameter + activation IO estimate (see helper)
+    Time: median CUDA events
+    """
+    import torch
+    import torchvision.models as tvm
+
+    assert torch.cuda.is_available()
+    device_name = torch.cuda.get_device_name(0)
+    torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+    torch.backends.cudnn.benchmark = True
+
+    builders = {
+        "resnet50": lambda: tvm.resnet50(weights=None),
+        "vit_b_16": lambda: tvm.vit_b_16(weights=None),
+    }
+
+    def time_fn(fn, warmup=5, iters=20) -> float:
+        for _ in range(warmup):
+            fn()
+        torch.cuda.synchronize()
+        times = []
+        for _ in range(iters):
+            start = torch.cuda.Event(enable_timing=True)
+            end = torch.cuda.Event(enable_timing=True)
+            start.record()
+            fn()
+            end.record()
+            torch.cuda.synchronize()
+            times.append(start.elapsed_time(end) / 1e3)
+        times.sort()
+        return times[len(times) // 2]
+
+    models_out = []
+    for name, build in builders.items():
+        # FP32 master weights + BF16 autocast: BN stays stable, conv/matmul hit TC.
+        model = build().to("cuda")
+        n_params = sum(p.numel() for p in model.parameters())
+        entry = {"name": name, "n_params": n_params, "infer": [], "train": []}
+
+        for phase in ("infer", "train"):
+            points = []
+            for bsz in [1, 2, 4, 8, 16, 32, 64]:
+                x = torch.randn(bsz, 3, 224, 224, device="cuda", dtype=torch.float32)
+                if phase == "infer":
+                    model.eval()
+
+                    def run(x=x, model=model):
+                        with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+                            model(x)
+
+                    flops, nbytes = _count_flops_and_bytes(model, run)
+                    s = time_fn(run, warmup=5, iters=30 if bsz <= 16 else 12)
+                else:
+                    model.train()
+
+                    def run(x=x, model=model):
+                        model.zero_grad(set_to_none=True)
+                        with torch.autocast("cuda", dtype=torch.bfloat16):
+                            loss = model(x).sum()
+                        loss.backward()
+
+                    flops, nbytes = _count_flops_and_bytes(model, run)
+                    # Forward hooks miss bwd weight re-read + grad write.
+                    # Params are FP32 master (4 bytes); grads match that storage.
+                    nbytes = nbytes + 8 * n_params
+                    s = time_fn(run, warmup=3, iters=12 if bsz <= 16 else 6)
+
+                points.append(
+                    {
+                        "batch": bsz,
+                        "seconds": s,
+                        "flops": flops,
+                        "bytes": nbytes,
+                        "intensity": flops / nbytes if nbytes else 0.0,
+                        "tflops": flops / s / 1e12,
+                        "gbs": nbytes / s / 1e9,
+                        "images_per_s": bsz / s,
+                    }
+                )
+                del x
+            entry[phase] = points
+        models_out.append(entry)
+        del model
+        torch.cuda.empty_cache()
+
+    return {"device": device_name, "models": models_out}
+
+
 def _attach_datasheet(results: dict) -> None:
     results["gpu"] = GPU
     key = max((k for k in DATASHEET if results["device"].startswith(k)), key=len)
@@ -350,3 +494,27 @@ def train():
             f"tokens={p['tokens']:5d}  {p['tokens_per_s']:10.1f} tok/s  "
             f"{p['tflops']:8.2f} TFLOP/s  {p['seconds'] * 1e3:7.2f} ms"
         )
+
+
+@app.local_entrypoint()
+def cv():
+    """CV models with instrumented MFU/MBU. Run: modal run playground/roofline_modal.py::cv"""
+    results = cv_sweep.remote()
+    _attach_datasheet(results)
+    peak_f = results["peak_bf16_tflops"]
+    peak_b = results["peak_mem_tbs"] * 1000  # GB/s
+    out = Path(__file__).parent / "roofline_cv_results.json"
+    out.write_text(json.dumps(results, indent=2) + "\n")
+    print(f"wrote {out}  ({results['device']})")
+    for m in results["models"]:
+        print(f"\n== {m['name']}  P={m['n_params'] / 1e6:.1f}M ==")
+        for phase in ("infer", "train"):
+            print(f"  [{phase}]")
+            for p in m[phase]:
+                mfu = 100 * p["tflops"] / peak_f
+                mbu = 100 * p["gbs"] / peak_b
+                print(
+                    f"    B={p['batch']:3d}  {p['images_per_s']:7.1f} img/s  "
+                    f"I={p['intensity']:6.1f}  MFU={mfu:5.1f}%  MBU={mbu:5.1f}%  "
+                    f"{p['tflops']:5.2f} TFLOP/s  {p['gbs']:6.1f} GB/s"
+                )
