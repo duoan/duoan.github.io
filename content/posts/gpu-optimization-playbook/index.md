@@ -12,9 +12,7 @@ cover:
 
 # The GPU Optimization Playbook: Architecture, Memory, and Balance
 
-Most "GPU optimization" advice is a bag of tricks: coalesce here, unroll there, add `__restrict__` and pray. Tricks are the *output* of optimization, not the method. The method is smaller and more durable: understand the machine, find the resource that is actually saturated, and rebalance work toward the resources that are idle.
-
-This post is a rewrite and English adaptation of my Zhihu survey [*GPU 编程优化综述*](https://zhuanlan.zhihu.com/p/1932035570852430148), reorganized around one claim: **almost every GPU kernel is limited by data movement, not arithmetic.** Once you internalize that, the whole catalog of techniques collapses into three questions.
+Most "GPU optimization" advice is a bag of tricks: coalesce here, unroll there, add `__restrict__` and pray. Tricks are the *output* of optimization, not the method. The method is smaller and more durable: understand the machine, find the resource that is actually saturated, and rebalance work toward the resources that are idle. **Almost every GPU kernel is limited by data movement, not arithmetic.** Once you internalize that, the whole catalog of techniques collapses into three questions.
 
 ## TL;DR
 
