@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="561.24pt" height="302.688pt" viewBox="0 0 561.24 302.688" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-07-11T20:48:36.631022</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 302.688 
+L 561.24 302.688 
+L 561.24 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 21.616691 247.51392 
+L 241.346945 247.51392 
+Q 243.832582 247.51392 243.832582 243.44832 
+L 243.832582 95.46048 
+Q 243.832582 91.39488 241.346945 91.39488 
+L 21.616691 91.39488 
+Q 19.131055 91.39488 19.131055 95.46048 
+L 19.131055 243.44832 
+Q 19.131055 247.51392 21.616691 247.51392 
+z
+" clip-path="url(#p1e5ed2770d)" style="fill: #d9f0df; stroke: #55a868; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 10px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="131.481818" y="116.6016" transform="rotate(-0 131.481818 116.6016)">One node = one MoE layer’s EP domain</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif" transform="translate(58.524162 143.435719)">Attention: sequence parallel (not TP)</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif" transform="translate(74.547678 153.192)">FFN: expert parallel (not TP)</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(67.360334 182.572106)">PP across nodes · SP/EP inside</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(76.331506 192.222919)">A2A→AG+RS when k large</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(76.830724 201.9792)">+ tile-fused intra-op overlap</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #55a868" x="131.481818" y="273.1272" transform="rotate(-0 131.481818 273.1272)">352B · 1440 H100 · 1.88× vs Megatron-LM</text>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #55a868" x="131.481818" y="45.552" transform="rotate(-0 131.481818 45.552)">MegaScale-MoE: keep MoE on NVLink</text>
+   </g>
+  </g>
+  <g id="axes_2">
+   <g id="patch_3">
+    <path d="M 319.893055 247.51392 
+L 539.623309 247.51392 
+Q 542.108945 247.51392 542.108945 243.44832 
+L 542.108945 95.46048 
+Q 542.108945 91.39488 539.623309 91.39488 
+L 319.893055 91.39488 
+Q 317.407418 91.39488 317.407418 95.46048 
+L 317.407418 243.44832 
+Q 317.407418 247.51392 319.893055 247.51392 
+z
+" clip-path="url(#p6824288686)" style="fill: #dbe7f5; stroke: #4c72b0; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_6">
+    <text style="font-weight: 700; font-size: 10px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="429.758182" y="116.6016" transform="rotate(-0 429.758182 116.6016)">Parallel Folding decouples Attn ↔ MoE</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif" transform="translate(386.565916 143.435719)">Attention: high TP/CP</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif" transform="translate(356.922166 153.192)">MoE: high EP (ETP=1), independent</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(360.388572 182.572106)">DeepEP / HybridEP for cross-node</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(363.236229 192.328387)">Grouped GEMM · permute fusion</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(365.235916 201.9792)">FP8 / NVFP4 selective precision</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4c72b0" x="429.758182" y="273.1272" transform="rotate(-0 429.758182 273.1272)">DeepSeek-V3: 1233/1048 TFLOPS on GB300/GB200</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #4c72b0" x="429.758182" y="45.552" transform="rotate(-0 429.758182 45.552)">Megatron-Core: fold across topologies</text>
+   </g>
+  </g>
+  <g id="text_11">
+   <text style="font-size: 13px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle" x="271.8" y="16.505156" transform="rotate(-0 271.8 16.505156)">Two production answers to the same communication wall</text>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p1e5ed2770d">
+   <rect x="7.2" y="51.552" width="248.563636" height="243.936"/>
+  </clipPath>
+  <clipPath id="p6824288686">
+   <rect x="305.476364" y="51.552" width="248.563636" height="243.936"/>
+  </clipPath>
+ </defs>
+</svg>

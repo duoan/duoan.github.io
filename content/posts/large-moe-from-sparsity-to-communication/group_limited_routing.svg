@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="516.6pt" height="262.711594pt" viewBox="0 0 516.6 262.711594" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-07-11T20:48:36.384428</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 262.711594 
+L 516.6 262.711594 
+L 516.6 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 27.288 106.488874 
+L 47.376 106.488874 
+L 47.376 73.890154 
+L 27.288 73.890154 
+z
+" clip-path="url(#p90113a361e)" style="fill: #f8d7d9; stroke: #c44e52; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 52.398 106.488874 
+L 72.486 106.488874 
+L 72.486 73.890154 
+L 52.398 73.890154 
+z
+" clip-path="url(#p90113a361e)" style="fill: #f8d7d9; stroke: #c44e52; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 77.508 106.488874 
+L 97.596 106.488874 
+L 97.596 73.890154 
+L 77.508 73.890154 
+z
+" clip-path="url(#p90113a361e)" style="fill: #f8d7d9; stroke: #c44e52; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 102.618 106.488874 
+L 122.706 106.488874 
+L 122.706 73.890154 
+L 102.618 73.890154 
+z
+" clip-path="url(#p90113a361e)" style="fill: #f8d7d9; stroke: #c44e52; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 127.728 106.488874 
+L 147.816 106.488874 
+L 147.816 73.890154 
+L 127.728 73.890154 
+z
+" clip-path="url(#p90113a361e)" style="fill: #f8d7d9; stroke: #c44e52; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 152.838 106.488874 
+L 172.926 106.488874 
+L 172.926 73.890154 
+L 152.838 73.890154 
+z
+" clip-path="url(#p90113a361e)" style="fill: #f8d7d9; stroke: #c44e52; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 177.948 106.488874 
+L 198.036 106.488874 
+L 198.036 73.890154 
+L 177.948 73.890154 
+z
+" clip-path="url(#p90113a361e)" style="fill: #f8d7d9; stroke: #c44e52; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 203.058 106.488874 
+L 223.146 106.488874 
+L 223.146 73.890154 
+L 203.058 73.890154 
+z
+" clip-path="url(#p90113a361e)" style="fill: #f8d7d9; stroke: #c44e52; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 291.4452 121.391146 
+L 365.7708 121.391146 
+Q 369.7884 121.391146 369.7884 117.665578 
+L 369.7884 67.37041 
+Q 369.7884 63.644842 365.7708 63.644842 
+L 291.4452 63.644842 
+Q 287.4276 63.644842 287.4276 67.37041 
+L 287.4276 117.665578 
+Q 287.4276 121.391146 291.4452 121.391146 
+z
+" clip-path="url(#p90113a361e)" style="fill: #d9f0df; stroke: #55a868; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 391.8852 121.391146 
+L 466.2108 121.391146 
+Q 470.2284 121.391146 470.2284 117.665578 
+L 470.2284 67.37041 
+Q 470.2284 63.644842 466.2108 63.644842 
+L 391.8852 63.644842 
+Q 387.8676 63.644842 387.8676 67.37041 
+L 387.8676 117.665578 
+Q 387.8676 121.391146 391.8852 121.391146 
+z
+" clip-path="url(#p90113a361e)" style="fill: #d9f0df; stroke: #55a868; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c44e52" x="132.75" y="45.948394" transform="rotate(-0 132.75 45.948394)">Free top-k (k=8)</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c44e52" x="132.75" y="129.773674" transform="rotate(-0 132.75 129.773674)">up to 8 machines</text>
+   </g>
+   <g id="text_3">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #55a868" x="383.85" y="45.948394" transform="rotate(-0 383.85 45.948394)">Group-limited (g=2, k=8)</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif" transform="translate(313.095656 82.893337)">group A</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif" transform="translate(310.099641 92.517994)">4 experts</text>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif" transform="translate(413.288156 82.893337)">group B</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif" transform="translate(410.539641 92.517994)">4 experts</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #55a868" x="383.85" y="143.744554" transform="rotate(-0 383.85 143.744554)">≤ 2 machines / NVLink domains</text>
+   </g>
+   <g id="text_7">
+    <text style="font-style: italic; font-size: 10px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #64748b" x="258.3" y="199.628074" transform="rotate(-0 258.3 199.628074)">Trade a little routing freedom for a lot less all-to-all fanout</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #64748b" x="258.3" y="227.569834" transform="rotate(-0 258.3 227.569834)">DeepSeek-V3-style: score groups by sum of top-2 experts, pick g groups, then top-k inside</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 13px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="258.3" y="16.663594" transform="rotate(-0 258.3 16.663594)">Group-limited routing caps cross-machine fanout from k to g</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p90113a361e">
+   <rect x="7.2" y="22.663594" width="502.2" height="232.848"/>
+  </clipPath>
+ </defs>
+</svg>

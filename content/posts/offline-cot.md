@@ -3,8 +3,10 @@ title: "What Offline CoT Distillation Taught Us About Small Vision-Language Mode
 date: 2025-12-11
 tags: ["VLM", "Reasoning", "Distillation", "CoT", "Multimodal"]
 categories: ["Engineering", "Research"]
-draft: false
+draft: true
 ---
+
+> **Superseded.** This note is folded into [SiQ-VL: A Curriculum for Small VLMs When Compute Is the Hard Constraint](/posts/siq-vl-curriculum-under-compute-constraints/). Kept as draft for git history only.
 
 ## Reasoning Is Expensive — But It Doesn’t Have to Be
 

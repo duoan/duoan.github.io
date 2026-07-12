@@ -4,6 +4,10 @@ date: 2026-01-16
 tags: ["PyTorch", "Performance", "Profiling", "CUDA", "Nsight"]
 categories: ["Engineering", "Performance"]
 draft: false
+cover:
+  image: data_pipeline.svg
+  alt: "End-to-end PyTorch training data pipeline stages"
+  relative: true
 ---
 
 # Profiling a PyTorch Training Job End to End

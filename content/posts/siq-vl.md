@@ -3,8 +3,10 @@ title: "SiQ-VL: Training a Reasoning-Capable VLM When You’re GPU-Poor"
 date: 2025-12-05
 tags: ["VLM", "Multimodal", "Reasoning", "Distillation", "SigLIP", "Qwen"]
 categories: ["Engineering", "Research"]
-draft: false
+draft: true
 ---
+
+> **Superseded.** This note is folded into [SiQ-VL: A Curriculum for Small VLMs When Compute Is the Hard Constraint](/posts/siq-vl-curriculum-under-compute-constraints/). Kept as draft for git history only.
 
 ## When You Can’t Afford Scale
 

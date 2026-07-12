@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="600.3pt" height="295.975594pt" viewBox="0 0 600.3 295.975594" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-07-11T20:55:38.492353</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 295.975594 
+L 600.3 295.975594 
+L 600.3 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 26.451 190.694314 
+L 188.829 190.694314 
+Q 192.177 190.694314 192.177 187.653034 
+L 192.177 55.357354 
+Q 192.177 52.316074 188.829 52.316074 
+L 26.451 52.316074 
+Q 23.103 52.316074 23.103 55.357354 
+L 23.103 187.653034 
+Q 23.103 190.694314 26.451 190.694314 
+z
+" clip-path="url(#p39139effec)" style="fill: #d9f0df; stroke: #55a868; stroke-width: 1.6; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 72.0675 184.231594 
+L 143.2125 184.231594 
+L 143.2125 170.925994 
+L 72.0675 170.925994 
+z
+" clip-path="url(#p39139effec)" style="fill: #d9f0df; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 214.776 190.694314 
+L 377.154 190.694314 
+Q 380.502 190.694314 380.502 187.653034 
+L 380.502 55.357354 
+Q 380.502 52.316074 377.154 52.316074 
+L 214.776 52.316074 
+Q 211.428 52.316074 211.428 55.357354 
+L 211.428 187.653034 
+Q 211.428 190.694314 214.776 190.694314 
+z
+" clip-path="url(#p39139effec)" style="fill: #dbe7f5; stroke: #4c72b0; stroke-width: 1.6; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 260.3925 184.231594 
+L 331.5375 184.231594 
+L 331.5375 170.925994 
+L 260.3925 170.925994 
+z
+" clip-path="url(#p39139effec)" style="fill: #d9f0df; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 403.101 190.694314 
+L 565.479 190.694314 
+Q 568.827 190.694314 568.827 187.653034 
+L 568.827 55.357354 
+Q 568.827 52.316074 565.479 52.316074 
+L 403.101 52.316074 
+Q 399.753 52.316074 399.753 55.357354 
+L 399.753 187.653034 
+Q 399.753 190.694314 403.101 190.694314 
+z
+" clip-path="url(#p39139effec)" style="fill: #f8e3d4; stroke: #dd8452; stroke-width: 1.6; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 448.7175 184.231594 
+L 519.8625 184.231594 
+L 519.8625 170.925994 
+L 448.7175 170.925994 
+z
+" clip-path="url(#p39139effec)" style="fill: #fef3c7; stroke: #dd8452; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 192.33874 121.505194 
+Q 201.803227 121.505194 209.702466 121.505194 
+" clip-path="url(#p39139effec)" style="fill: none; stroke: #1f2933; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 205.302466 119.305194 
+L 209.702466 121.505194 
+L 205.302466 123.705194 
+z
+" clip-path="url(#p39139effec)" style="fill: #1f2933; stroke: #1f2933; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 380.66374 121.505194 
+Q 390.128227 121.505194 398.027466 121.505194 
+" clip-path="url(#p39139effec)" style="fill: none; stroke: #1f2933; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 393.627466 119.305194 
+L 398.027466 121.505194 
+L 393.627466 123.705194 
+z
+" clip-path="url(#p39139effec)" style="fill: #1f2933; stroke: #1f2933; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(88.077187 60.320925)">Stage 1</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(55.994141 72.084394)">Projector alignment</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(81.706641 96.764419)">Vision frozen</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(85.130859 106.283606)">LLM frozen</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(80.129531 115.802794)">Projector only</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 8.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(76.774375 158.13405)">FineVision-class</text>
+    <text style="font-size: 8.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(79.761992 167.124394)">alignment data</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="107.64" y="179.836999" transform="rotate(-0 107.64 179.836999)">done</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(276.402187 60.320925)">Stage 2</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(251.048906 72.084394)">Instruction / VQA</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(270.031641 96.764419)">Vision frozen</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(267.702891 106.283606)">LLM LoRA/full</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(274.580156 115.802794)">+ projector</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 8.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(267.459453 158.13405)">VQAv2 / GQA /</text>
+    <text style="font-size: 8.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(271.641055 167.124394)">TextVQA mix</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="295.965" y="179.836999" transform="rotate(-0 295.965 179.836999)">done</text>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(464.727187 60.320925)">Stage 3</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(454.657031 72.084394)">Offline CoT</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(458.356641 96.764419)">Vision frozen</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(455.024531 106.283606)">LLM continues</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(460.90125 115.802794)">+ rationales</text>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 8.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(459.727656 158.003362)">Multi-teacher</text>
+    <text style="font-size: 8.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(457.133164 167.124394)">(image,Q,R,A)</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="484.29" y="179.790124" transform="rotate(-0 484.29 179.790124)">in progress</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #64748b" x="300.15" y="227.949994" transform="rotate(-0 300.15 227.949994)">Do not merge stages. Alignment failure and reasoning failure look identical in one loss.</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #64748b" x="300.15" y="254.561194" transform="rotate(-0 300.15 254.561194)">Stage 4 (RL) is optional and last — distill first while GPU-poor</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #64748b" x="300.15" y="277.370794" transform="rotate(-0 300.15 277.370794)">After SiQ-VL curriculum (github.com/duoan/SiQ_VL)</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 13px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="300.15" y="16.663594" transform="rotate(-0 300.15 16.663594)">Curriculum: one capability per stage</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p39139effec">
+   <rect x="7.2" y="22.663594" width="585.9" height="266.112"/>
+  </clipPath>
+ </defs>
+</svg>

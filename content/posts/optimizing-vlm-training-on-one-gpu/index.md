@@ -4,6 +4,10 @@ date: 2026-05-24
 tags: ["VLM", "Training", "Performance", "GPU", "Kernel Fusion", "PyTorch", "BF16"]
 categories: ["Engineering", "Performance"]
 draft: false
+cover:
+  image: cumulative_speedup.svg
+  alt: "Cumulative speedup across five VLM training optimization layers"
+  relative: true
 ---
 
 # Optimizing VLM Training on One GPU: A Five-Layer Recipe
@@ -38,7 +42,7 @@ The four findings that surprised me the most:
 - "Cache the vision features to skip the encoder" lost throughput on Blackwell. The host-to-device transfer cost more than the SigLIP forward.
 - TileGym's `cuTile` kernels need power-of-two head dimensions. The 1.5B SigLIP variant has `head_dim=72`. Game over for that path.
 
-**Companion materials.** Same sweep written up as a formal [technical report (PDF)](https://github.com/duoan/SiQ_VL/blob/master/docs/report/main.pdf) ([LaTeX source](https://github.com/duoan/SiQ_VL/blob/master/docs/report/main.tex)) with related-work context. Raw run-by-run data: [`benchmarks.csv`](./benchmarks.csv) (48 runs). Training code, profiler traces, and pre-trained checkpoints: [`duoan/SiQ_VL`](https://github.com/duoan/SiQ_VL). Live training curves: [W&B dashboard](https://wandb.ai/ReproduceAI/siq-vl).
+**Companion materials.** Training *curriculum* (freeze / stages / offline CoT): [SiQ-VL curriculum post](/posts/siq-vl-curriculum-under-compute-constraints/). Same sweep written up as a formal [technical report (PDF)](https://github.com/duoan/SiQ_VL/blob/master/docs/report/main.pdf) ([LaTeX source](https://github.com/duoan/SiQ_VL/blob/master/docs/report/main.tex)) with related-work context. Raw run-by-run data: [`benchmarks.csv`](./benchmarks.csv) (48 runs). Training code, profiler traces, and pre-trained checkpoints: [`duoan/SiQ_VL`](https://github.com/duoan/SiQ_VL). Live training curves: [W&B dashboard](https://wandb.ai/ReproduceAI/siq-vl).
 
 ## Why this post exists
 

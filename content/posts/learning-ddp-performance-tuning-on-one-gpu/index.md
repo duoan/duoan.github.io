@@ -4,6 +4,10 @@ date: 2026-02-18
 tags: ["PyTorch", "DDP", "Distributed Training", "Performance", "Systems"]
 categories: ["Engineering", "Performance"]
 draft: false
+cover:
+  image: pathology_throughput.svg
+  alt: "DDP throughput under straggler and communication pathologies"
+  relative: true
 ---
 
 # Learning PyTorch DDP Performance Tuning on a One-GPU Machine

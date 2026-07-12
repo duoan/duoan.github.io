@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="544.5pt" height="284.333194pt" viewBox="0 0 544.5 284.333194" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-07-11T20:48:36.525621</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 284.333194 
+L 544.5 284.333194 
+L 544.5 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 27.5205 184.675906 
+L 172.4145 184.675906 
+Q 175.9485 184.675906 175.9485 181.282978 
+L 175.9485 76.10221 
+Q 175.9485 72.709282 172.4145 72.709282 
+L 27.5205 72.709282 
+Q 23.9865 72.709282 23.9865 76.10221 
+L 23.9865 181.282978 
+Q 23.9865 184.675906 27.5205 184.675906 
+z
+" clip-path="url(#p4b4d333bd7)" style="fill: #f8d7d9; stroke: #c44e52; stroke-width: 1.6; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 195.3855 184.675906 
+L 340.2795 184.675906 
+Q 343.8135 184.675906 343.8135 181.282978 
+L 343.8135 76.10221 
+Q 343.8135 72.709282 340.2795 72.709282 
+L 195.3855 72.709282 
+Q 191.8515 72.709282 191.8515 76.10221 
+L 191.8515 181.282978 
+Q 191.8515 184.675906 195.3855 184.675906 
+z
+" clip-path="url(#p4b4d333bd7)" style="fill: #f8e3d4; stroke: #dd8452; stroke-width: 1.6; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 363.2505 184.675906 
+L 508.1445 184.675906 
+Q 511.6785 184.675906 511.6785 181.282978 
+L 511.6785 76.10221 
+Q 511.6785 72.709282 508.1445 72.709282 
+L 363.2505 72.709282 
+Q 359.7165 72.709282 359.7165 76.10221 
+L 359.7165 181.282978 
+Q 359.7165 184.675906 363.2505 184.675906 
+z
+" clip-path="url(#p4b4d333bd7)" style="fill: #dbe7f5; stroke: #4c72b0; stroke-width: 1.6; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 176.061526 128.692594 
+Q 183.899606 128.692594 190.172438 128.692594 
+" clip-path="url(#p4b4d333bd7)" style="fill: none; stroke: #1f2933; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 185.772438 126.492594 
+L 190.172438 128.692594 
+L 185.772438 130.892594 
+z
+" clip-path="url(#p4b4d333bd7)" style="fill: #1f2933; stroke: #1f2933; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 343.926526 128.692594 
+Q 351.764606 128.692594 358.037438 128.692594 
+" clip-path="url(#p4b4d333bd7)" style="fill: none; stroke: #1f2933; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 353.637438 126.492594 
+L 358.037438 128.692594 
+L 353.637438 130.892594 
+z
+" clip-path="url(#p4b4d333bd7)" style="fill: #1f2933; stroke: #1f2933; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 12px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="99.9675" y="94.763314" transform="rotate(-0 99.9675 94.763314)">Memory Wall</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(51.202969 131.765261)">all E experts live in RAM</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(45.278438 141.416074)">recompute · offload · FSDP</text>
+   </g>
+   <g id="text_3">
+    <text style="font-weight: 700; font-size: 12px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="267.8325" y="94.763314" transform="rotate(-0 267.8325 94.763314)">Communication Wall</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(228.068672 131.896886)">A2A scales with k·H</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(223.317656 141.416074)">NVLink vs IB · overlap</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 12px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="435.6975" y="94.763314" transform="rotate(-0 435.6975 94.763314)">Compute Wall</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(395.445 131.659792)">many small GEMMs</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #64748b" transform="translate(375.422812 141.416074)">grouped_mm · fusion · graphs</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #64748b" x="272.25" y="217.756954" transform="rotate(-0 272.25 217.756954)">↑ batch  → better GEMM, worse memory + bytes</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #64748b" x="272.25" y="241.083334" transform="rotate(-0 272.25 241.083334)">CUDA Graphs → less host overhead, fights dropless dynamic shapes</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #64748b" x="272.25" y="264.409714" transform="rotate(-0 272.25 264.409714)">After Megatron-Core MoE (arXiv:2603.07685)</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 13px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="272.25" y="16.663594" transform="rotate(-0 272.25 16.663594)">MoE’s three walls are coupled — fix one, pressure moves</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p4b4d333bd7">
+   <rect x="7.2" y="22.663594" width="530.1" height="254.4696"/>
+  </clipPath>
+ </defs>
+</svg>

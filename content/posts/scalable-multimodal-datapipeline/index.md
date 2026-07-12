@@ -4,6 +4,10 @@ date: 2025-12-22
 tags: ["Multimodal", "Data Pipeline", "Streaming", "Scalability", "VLM"]
 categories: ["Engineering", "Research"]
 draft: false
+cover:
+  image: scalable-multimodal-datapipeline-2025-12-22-2129.svg
+  alt: "Streaming-first multimodal data pipeline"
+  relative: true
 ---
 
 ## Most “Scalable” Multimodal Pipelines Don’t Survive Foundation-Model Scale

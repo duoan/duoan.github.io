@@ -3,8 +3,10 @@ title: "A Minimal Recipe for Training VLMs Under Compute Constraints"
 date: 2025-12-15
 tags: ["VLM", "Multimodal", "Compute Constraints", "Recipe", "Engineering"]
 categories: ["Engineering"]
-draft: false
+draft: true
 ---
+
+> **Superseded.** This note is folded into [SiQ-VL: A Curriculum for Small VLMs When Compute Is the Hard Constraint](/posts/siq-vl-curriculum-under-compute-constraints/). Kept as draft for git history only.
 
 ## The Problem Nobody Likes to Admit
 

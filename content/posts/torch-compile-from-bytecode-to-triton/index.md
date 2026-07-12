@@ -4,6 +4,10 @@ date: 2026-05-31
 tags: ["PyTorch", "torch.compile", "Dynamo", "Inductor", "Triton", "Performance"]
 categories: ["Engineering", "Performance"]
 draft: false
+cover:
+  image: compile_pipeline.svg
+  alt: "torch.compile path from Python bytecode to Triton kernels"
+  relative: true
 ---
 
 # torch.compile: The Mental Model That Actually Matters

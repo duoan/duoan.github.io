@@ -4,6 +4,10 @@ date: 2026-07-11
 tags: ["Performance", "Roofline", "GPU", "CUDA", "MFU", "Modal"]
 categories: ["Engineering", "Performance"]
 draft: false
+cover:
+  image: roofline_concept.svg
+  alt: "Roofline: compute roof meets bandwidth slope at the ridge point"
+  relative: true
 ---
 
 # Roofline: The First Step of Any Performance Optimization

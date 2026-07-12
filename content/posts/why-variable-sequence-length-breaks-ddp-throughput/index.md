@@ -4,6 +4,10 @@ date: 2026-03-12
 tags: ["Transformer", "LLM", "DDP", "Performance", "Data Pipeline"]
 categories: ["Engineering", "Performance"]
 draft: false
+cover:
+  image: strategy_step_time.svg
+  alt: "Step time under different variable-length batching strategies"
+  relative: true
 ---
 
 # Why Variable Sequence Length Breaks DDP Throughput
