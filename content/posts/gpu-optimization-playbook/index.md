@@ -183,6 +183,3 @@ The catalog above is a menu, not an itinerary. Ordering matters more than comple
 
 The three questions — *is data close? is work regular? is it balanced?* — are enough to reason about almost any kernel without memorizing the trick list. The tricks are just the answers.
 
----
-
-*Adapted and rewritten in English from my Zhihu article [GPU 编程优化综述](https://zhuanlan.zhihu.com/p/1932035570852430148). Diagrams redrawn in English; generator in [`playground/gpu_optimization_figures.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/gpu_optimization_figures.py).*
