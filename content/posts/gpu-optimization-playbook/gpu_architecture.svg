@@ -1,0 +1,439 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="691.2pt" height="403.2pt" viewBox="0 0 691.2 403.2" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-07-12T17:46:16.016629</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 403.2 
+L 691.2 403.2 
+L 691.2 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 31.347 375.5744 
+L 448.497 375.5744 
+Q 451.8342 375.5744 451.8342 373.152 
+L 451.8342 46.128 
+Q 451.8342 43.7056 448.497 43.7056 
+L 31.347 43.7056 
+Q 28.0098 43.7056 28.0098 46.128 
+L 28.0098 373.152 
+Q 28.0098 375.5744 31.347 375.5744 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #4c72b0; stroke-width: 1.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 53.595 101.035733 
+L 426.249 101.035733 
+Q 429.5862 101.035733 429.5862 98.613333 
+L 429.5862 66.314667 
+Q 429.5862 63.892267 426.249 63.892267 
+L 53.595 63.892267 
+Q 50.2578 63.892267 50.2578 66.314667 
+L 50.2578 98.613333 
+Q 50.2578 101.035733 53.595 101.035733 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #f7e9e8; stroke: #c44e52; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 53.595 359.425067 
+L 426.249 359.425067 
+Q 429.5862 359.425067 429.5862 357.002667 
+L 429.5862 118.8 
+Q 429.5862 116.3776 426.249 116.3776 
+L 53.595 116.3776 
+Q 50.2578 116.3776 50.2578 118.8 
+L 50.2578 357.002667 
+Q 50.2578 359.425067 53.595 359.425067 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #fbfcfe; stroke: #1f2933; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 70.281 169.6704 
+L 409.563 169.6704 
+Q 412.9002 169.6704 412.9002 167.248 
+L 412.9002 141.005333 
+Q 412.9002 138.582933 409.563 138.582933 
+L 70.281 138.582933 
+Q 66.9438 138.582933 66.9438 141.005333 
+L 66.9438 167.248 
+Q 66.9438 169.6704 70.281 169.6704 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #efecf5; stroke: #8172b3; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 70.281 343.275733 
+L 170.397 343.275733 
+Q 173.7342 343.275733 173.7342 340.853333 
+L 173.7342 187.434667 
+Q 173.7342 185.012267 170.397 185.012267 
+L 70.281 185.012267 
+Q 66.9438 185.012267 66.9438 187.434667 
+L 66.9438 340.853333 
+Q 66.9438 343.275733 70.281 343.275733 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #faefe6; stroke: #dd8452; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 76.9554 234.267733 
+L 163.7226 234.267733 
+Q 167.0598 234.267733 167.0598 231.845333 
+L 167.0598 207.621333 
+Q 167.0598 205.198933 163.7226 205.198933 
+L 76.9554 205.198933 
+Q 73.6182 205.198933 73.6182 207.621333 
+L 73.6182 231.845333 
+Q 73.6182 234.267733 76.9554 234.267733 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #dd8452; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 76.9554 268.585067 
+L 163.7226 268.585067 
+Q 167.0598 268.585067 167.0598 266.162667 
+L 167.0598 241.938667 
+Q 167.0598 239.516267 163.7226 239.516267 
+L 76.9554 239.516267 
+Q 73.6182 239.516267 73.6182 241.938667 
+L 73.6182 266.162667 
+Q 73.6182 268.585067 76.9554 268.585067 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #55a868; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 76.9554 302.9024 
+L 163.7226 302.9024 
+Q 167.0598 302.9024 167.0598 300.48 
+L 167.0598 276.256 
+Q 167.0598 273.8336 163.7226 273.8336 
+L 76.9554 273.8336 
+Q 73.6182 273.8336 73.6182 276.256 
+L 73.6182 300.48 
+Q 73.6182 302.9024 76.9554 302.9024 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #4c72b0; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 76.9554 337.219733 
+L 163.7226 337.219733 
+Q 167.0598 337.219733 167.0598 334.797333 
+L 167.0598 310.573333 
+Q 167.0598 308.150933 163.7226 308.150933 
+L 76.9554 308.150933 
+Q 73.6182 308.150933 73.6182 310.573333 
+L 73.6182 334.797333 
+Q 73.6182 337.219733 76.9554 337.219733 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #8172b3; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 189.864 343.275733 
+L 289.98 343.275733 
+Q 293.3172 343.275733 293.3172 340.853333 
+L 293.3172 187.434667 
+Q 293.3172 185.012267 289.98 185.012267 
+L 189.864 185.012267 
+Q 186.5268 185.012267 186.5268 187.434667 
+L 186.5268 340.853333 
+Q 186.5268 343.275733 189.864 343.275733 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #faefe6; stroke: #dd8452; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 196.5384 234.267733 
+L 283.3056 234.267733 
+Q 286.6428 234.267733 286.6428 231.845333 
+L 286.6428 207.621333 
+Q 286.6428 205.198933 283.3056 205.198933 
+L 196.5384 205.198933 
+Q 193.2012 205.198933 193.2012 207.621333 
+L 193.2012 231.845333 
+Q 193.2012 234.267733 196.5384 234.267733 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #dd8452; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 196.5384 268.585067 
+L 283.3056 268.585067 
+Q 286.6428 268.585067 286.6428 266.162667 
+L 286.6428 241.938667 
+Q 286.6428 239.516267 283.3056 239.516267 
+L 196.5384 239.516267 
+Q 193.2012 239.516267 193.2012 241.938667 
+L 193.2012 266.162667 
+Q 193.2012 268.585067 196.5384 268.585067 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #55a868; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_14">
+    <path d="M 196.5384 302.9024 
+L 283.3056 302.9024 
+Q 286.6428 302.9024 286.6428 300.48 
+L 286.6428 276.256 
+Q 286.6428 273.8336 283.3056 273.8336 
+L 196.5384 273.8336 
+Q 193.2012 273.8336 193.2012 276.256 
+L 193.2012 300.48 
+Q 193.2012 302.9024 196.5384 302.9024 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #4c72b0; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_15">
+    <path d="M 196.5384 337.219733 
+L 283.3056 337.219733 
+Q 286.6428 337.219733 286.6428 334.797333 
+L 286.6428 310.573333 
+Q 286.6428 308.150933 283.3056 308.150933 
+L 196.5384 308.150933 
+Q 193.2012 308.150933 193.2012 310.573333 
+L 193.2012 334.797333 
+Q 193.2012 337.219733 196.5384 337.219733 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #8172b3; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_16">
+    <path d="M 309.447 343.275733 
+L 409.563 343.275733 
+Q 412.9002 343.275733 412.9002 340.853333 
+L 412.9002 187.434667 
+Q 412.9002 185.012267 409.563 185.012267 
+L 309.447 185.012267 
+Q 306.1098 185.012267 306.1098 187.434667 
+L 306.1098 340.853333 
+Q 306.1098 343.275733 309.447 343.275733 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #faefe6; stroke: #dd8452; stroke-width: 1.3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_17">
+    <path d="M 316.1214 234.267733 
+L 402.8886 234.267733 
+Q 406.2258 234.267733 406.2258 231.845333 
+L 406.2258 207.621333 
+Q 406.2258 205.198933 402.8886 205.198933 
+L 316.1214 205.198933 
+Q 312.7842 205.198933 312.7842 207.621333 
+L 312.7842 231.845333 
+Q 312.7842 234.267733 316.1214 234.267733 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #dd8452; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_18">
+    <path d="M 316.1214 268.585067 
+L 402.8886 268.585067 
+Q 406.2258 268.585067 406.2258 266.162667 
+L 406.2258 241.938667 
+Q 406.2258 239.516267 402.8886 239.516267 
+L 316.1214 239.516267 
+Q 312.7842 239.516267 312.7842 241.938667 
+L 312.7842 266.162667 
+Q 312.7842 268.585067 316.1214 268.585067 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #55a868; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_19">
+    <path d="M 316.1214 302.9024 
+L 402.8886 302.9024 
+Q 406.2258 302.9024 406.2258 300.48 
+L 406.2258 276.256 
+Q 406.2258 273.8336 402.8886 273.8336 
+L 316.1214 273.8336 
+Q 312.7842 273.8336 312.7842 276.256 
+L 312.7842 300.48 
+Q 312.7842 302.9024 316.1214 302.9024 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #4c72b0; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_20">
+    <path d="M 316.1214 337.219733 
+L 402.8886 337.219733 
+Q 406.2258 337.219733 406.2258 334.797333 
+L 406.2258 310.573333 
+Q 406.2258 308.150933 402.8886 308.150933 
+L 316.1214 308.150933 
+Q 312.7842 308.150933 312.7842 310.573333 
+L 312.7842 334.797333 
+Q 312.7842 337.219733 316.1214 337.219733 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #8172b3; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_21">
+    <path d="M 498.555 262.529067 
+L 659.853 262.529067 
+Q 663.1902 262.529067 663.1902 260.106667 
+L 663.1902 159.173333 
+Q 663.1902 156.750933 659.853 156.750933 
+L 498.555 156.750933 
+Q 495.2178 156.750933 495.2178 159.173333 
+L 495.2178 260.106667 
+Q 495.2178 262.529067 498.555 262.529067 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #ffffff; stroke: #55a868; stroke-width: 1.8; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_22">
+    <path d="M 515.241 210.043733 
+L 643.167 210.043733 
+Q 646.5042 210.043733 646.5042 207.621333 
+L 646.5042 181.378667 
+Q 646.5042 178.956267 643.167 178.956267 
+L 515.241 178.956267 
+Q 511.9038 178.956267 511.9038 181.378667 
+L 511.9038 207.621333 
+Q 511.9038 210.043733 515.241 210.043733 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #e7f1ea; stroke: #55a868; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_23">
+    <path d="M 515.241 250.417067 
+L 643.167 250.417067 
+Q 646.5042 250.417067 646.5042 247.994667 
+L 646.5042 221.752 
+Q 646.5042 219.3296 643.167 219.3296 
+L 515.241 219.3296 
+Q 511.9038 219.3296 511.9038 221.752 
+L 511.9038 247.994667 
+Q 511.9038 250.417067 515.241 250.417067 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #e7f1ea; stroke: #55a868; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_24">
+    <path d="M 455.068414 209.64 
+Q 473.526926 209.64 491.985438 209.64 
+" clip-path="url(#pcb092af56d)" style="fill: none; stroke: #1f2933; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 460.268414 212.24 
+L 455.068414 209.64 
+L 460.268414 207.04 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #1f2933; stroke: #1f2933; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 486.785438 207.04 
+L 491.985438 209.64 
+L 486.785438 212.24 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #1f2933; stroke: #1f2933; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+   <g id="patch_25">
+    <path d="M 239.922 104.421286 
+Q 239.922 118.800578 239.922 133.17987 
+" clip-path="url(#pcb092af56d)" style="fill: none; stroke: #c44e52; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 237.322 109.621286 
+L 239.922 104.421286 
+L 242.522 109.621286 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #c44e52; stroke: #c44e52; stroke-width: 1.6; stroke-linecap: round"/>
+    <path d="M 242.522 127.97987 
+L 239.922 133.17987 
+L 237.322 127.97987 
+z
+" clip-path="url(#pcb092af56d)" style="fill: #c44e52; stroke: #c44e52; stroke-width: 1.6; stroke-linecap: round"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #4c72b0" x="42.471" y="58.24" transform="rotate(-0 42.471 58.24)">GPU</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="239.922" y="85.085406" transform="rotate(-0 239.922 85.085406)">Device memory (HBM / GDDR)  —  high capacity, ~1–8 TB/s</text>
+   </g>
+   <g id="text_3">
+    <text style="font-weight: 700; font-size: 10.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #1f2933" x="64.719" y="130.912" transform="rotate(-0 64.719 130.912)">Chip</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 9.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="239.922" y="156.748073" transform="rotate(-0 239.922 156.748073)">L2 cache (shared across all SMs)</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #dd8452" x="120.339" y="195.509333" transform="rotate(-0 120.339 195.509333)">SM 0</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 7.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(98.028844 217.57529)">CUDA cores</text>
+    <text style="font-size: 7.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(96.210781 226.085627)">FP32 / INT32</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 7.8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="120.339" y="256.202979" transform="rotate(-0 120.339 256.202979)">Tensor Cores</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 7.8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="120.339" y="290.520312" transform="rotate(-0 120.339 290.520312)">Register file</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 7.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="120.339" y="324.782458" transform="rotate(-0 120.339 324.782458)">L1 / shared mem</text>
+   </g>
+   <g id="text_10">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #dd8452" x="239.922" y="195.509333" transform="rotate(-0 239.922 195.509333)">SM 1</text>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 7.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(217.611844 217.57529)">CUDA cores</text>
+    <text style="font-size: 7.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(215.793781 226.085627)">FP32 / INT32</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 7.8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="239.922" y="256.202979" transform="rotate(-0 239.922 256.202979)">Tensor Cores</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 7.8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="239.922" y="290.520312" transform="rotate(-0 239.922 290.520312)">Register file</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 7.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="239.922" y="324.782458" transform="rotate(-0 239.922 324.782458)">L1 / shared mem</text>
+   </g>
+   <g id="text_15">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #dd8452" x="359.505" y="195.509333" transform="rotate(-0 359.505 195.509333)">SM 2</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 7.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(337.194844 217.57529)">CUDA cores</text>
+    <text style="font-size: 7.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #1f2933" transform="translate(335.376781 226.085627)">FP32 / INT32</text>
+   </g>
+   <g id="text_17">
+    <text style="font-size: 7.8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="359.505" y="256.202979" transform="rotate(-0 359.505 256.202979)">Tensor Cores</text>
+   </g>
+   <g id="text_18">
+    <text style="font-size: 7.8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="359.505" y="290.520312" transform="rotate(-0 359.505 290.520312)">Register file</text>
+   </g>
+   <g id="text_19">
+    <text style="font-size: 7.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="359.505" y="324.782458" transform="rotate(-0 359.505 324.782458)">L1 / shared mem</text>
+   </g>
+   <g id="text_20">
+    <text style="font-size: 8.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #64748b" x="231.579" y="352.965333" transform="rotate(-0 231.579 352.965333)">…  tens of SMs per GPU</text>
+   </g>
+   <g id="text_21">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #55a868" x="509.679" y="171.285333" transform="rotate(-0 509.679 171.285333)">Host</text>
+   </g>
+   <g id="text_22">
+    <text style="font-size: 9.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="579.204" y="197.121406" transform="rotate(-0 579.204 197.121406)">CPU</text>
+   </g>
+   <g id="text_23">
+    <text style="font-size: 8.6px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="579.204" y="237.246396" transform="rotate(-0 579.204 237.246396)">Host memory (DRAM)</text>
+   </g>
+   <g id="text_24">
+    <text style="font-size: 8.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="473.526" y="199.546667" transform="rotate(-0 473.526 199.546667)">PCIe</text>
+   </g>
+   <g id="text_25">
+    <text style="font-size: 7.5px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #64748b" x="473.526" y="221.752" transform="rotate(-0 473.526 221.752)">~tens of GB/s</text>
+   </g>
+   <g id="text_26">
+    <text style="font-size: 8px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #c44e52" x="253.827" y="120.0112" transform="rotate(-0 253.827 120.0112)">memory bus</text>
+   </g>
+   <g id="text_27">
+    <text style="font-size: 12px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #1f2933" x="345.6" y="21.96" transform="rotate(-0 345.6 21.96)">The GPU is a throughput coprocessor hanging off the host over PCIe</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pcb092af56d">
+   <rect x="11.88" y="27.96" width="667.44" height="363.36"/>
+  </clipPath>
+ </defs>
+</svg>
