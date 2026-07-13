@@ -183,7 +183,7 @@ Caveat: this is **not** a full ARGUS CUPTI injector + streaming Processor. We on
 
 ## Case Studies — What Actually Breaks at Scale
 
-These five stories are more valuable than the microbenchmarks. We remasured Cases **1–4** at small scale on Modal; Case 5 is noted but skipped (needs multi-dim EP/DP).
+These five stories are more valuable than the microbenchmarks. We remasured Cases **1–4** at small scale; each subsection has a **Reproduce** recipe you can run on Modal.
 
 | Paper case | Failure mode | Small-scale? | Our demo |
 |---|---|---|---|
@@ -193,15 +193,43 @@ These five stories are more valuable than the microbenchmarks. We remasured Case
 | 4 FlashAttention JIT | Intermittent host compile stall | **Yes** (host sleep on A10G) | L1 jitter, GPU flat |
 | 5 Misleading network alert | Compute straggler → late collective | Partial | Skipped; composable from 1+2 |
 
+All four demos live in [`playground/argus_cases_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/argus_cases_modal.py). Run everything, or one case at a time:
+
 ```bash
+# all cases → playground/argus_cases_results.json
 uv run modal run playground/argus_cases_modal.py
+
+# single case → playground/argus_cases_case{N}_results.json
+uv run modal run playground/argus_cases_modal.py --case 1
+uv run modal run playground/argus_cases_modal.py --case 2
+uv run modal run playground/argus_cases_modal.py --case 3
+uv run modal run playground/argus_cases_modal.py --case 4
+
+# regenerate figures into this post bundle
+uv run python playground/argus_demo_figures.py \
+  --cases playground/argus_cases_results.json \
+  --out content/posts/argus-tracing-at-10000-gpu-scale
 ```
+
+Committed results: [argus_cases_results.json](./argus_cases_results.json).
 
 ### Case 1: Compute Straggler Localization
 
 **Paper (4096-GPU VLM):** L1 regression + L2 CV on compute-only phases isolated DP replicas 656–657 with **150×** slower compute kernels.
 
-**Our remasurement:** 8 ranks, straggler rank 5 from step 15. Job iteration time (max across ranks) jumps ~16×; L1 change-point at t=15; L2 flags only rank 5 on `self_attention` / `mlp`.
+**Reproduce**
+
+1. Fault injection (`case1_compute_straggler`): 8 DP ranks × 40 steps; from step 15, rank 5’s `self_attention` / `mlp` are scaled ×25 / ×20 (local compute only).
+2. Detection: L1 change-point on job iteration time (`max` across ranks); L2 CV + z-score on post-onset phase means.
+3. Run:
+
+```bash
+uv run modal run playground/argus_cases_modal.py --case 1
+```
+
+4. Expect stdout like `Case1 L1=True L2=True flagged=[5]`, and JSON fields `l1_change_point.t ≈ 15`, `l2.flagged_ranks == [5]`.
+
+**Our remasurement:** iteration time jumps ~16× at onset; L1 change-point at t=15; L2 flags only rank 5.
 
 ![Case 1 remasurement](./case1_compute_straggler.svg)
 
@@ -209,7 +237,19 @@ uv run modal run playground/argus_cases_modal.py
 
 **Paper (512-GPU audio):** iteration time *stable* so L1/L2 silent; L3 W₁ revealed one EDP group with PCIe faults.
 
-**Our remasurement:** ranks 4–7 degraded. L1 silent. AllReduce W₁ **inter/intra ≈ 179×**; healthy-mode p50 gating flags `{4,5,6,7}`. When half the ranks are slow, plain IQR-on-mean-W₁ is symmetric and fails — block structure (or healthy-mode reference) is load-bearing.
+**Reproduce**
+
+1. Fault injection (`case2_link_degradation`): ranks `{4,5,6,7}` get slower synthetic `AllReduce` / `AllGather` / `ReduceScatter` durations (×8 / ×12 / ×20); iteration time is a flat elevated series (steady degraded regime).
+2. Detection: confirm L1 is silent; build per-kernel W₁ matrices + primary-cluster p50; flag ranks whose p50 ≥ 3× the healthy-half median. (Plain IQR-on-mean-W₁ fails when half the ranks are slow — groups are symmetric.)
+3. Run:
+
+```bash
+uv run modal run playground/argus_cases_modal.py --case 2
+```
+
+4. Expect `Case2 L1_silent=True L3=True flagged=[4, 5, 6, 7] W1 inter/intra≈179x`.
+
+**Our remasurement:** L1 silent; AllReduce W₁ **inter/intra ≈ 179×**; p50 gating recovers the degraded EDP group.
 
 ![Case 2 remasurement](./case2_link_degradation.svg)
 
@@ -217,7 +257,19 @@ uv run modal run playground/argus_cases_modal.py
 
 **Paper (PP=4):** last stage ~1.9× slower backward-compute, but `finish_grad_sync` aligns totals so L1–L3 stay quiet.
 
-**Our remasurement:** stage 3 at **1.90×** bwd; aligned totals CV = **0** → L1/L2 silent; inspecting backward-compute recovers stage 3. Upstream bubbles larger (idle wait); straggler bubbles tighter (compute-packed).
+**Reproduce**
+
+1. Fault injection (`case3_pp_bubble_masking`): 4 PP stages; stage 3 backward-compute ×1.9; upstream stages get larger bubbles (idle wait); `finish_grad_sync` forces identical fwd–bwd totals across stages.
+2. Detection: L1/L2 on aligned totals should be silent (CV ≈ 0); inspect backward-compute means / peer-median ratio (≥1.5×) to recover stage 3.
+3. Run:
+
+```bash
+uv run modal run playground/argus_cases_modal.py --case 3
+```
+
+4. Expect `Case3 totals_silent=True bwd_detected=True ratio≈1.90`.
+
+**Our remasurement:** totals CV = **0**; bwd ratio **1.90×** catches stage 3. Upstream bubbles larger; straggler bubbles tighter (compute-packed).
 
 ![Case 3 remasurement](./case3_pp_masking.svg)
 
@@ -225,7 +277,19 @@ uv run modal run playground/argus_cases_modal.py
 
 **Paper:** occasional **40×** backward spikes from CuTe DSL JIT; L1 catches jitter; L2/L3 dilute rare events.
 
-**Our remasurement (A10G):** 80 ms host sleep on steps 12 and 27. Wall spike **~45×**; GPU event time stays ~1.8 ms (host-bound). L1 jitter fires; window-mean L2/L3 would dilute the spikes.
+**Reproduce**
+
+1. Fault injection (`case4_jit_stall_gpu`): real A10G training step; on steps `{12, 27}` insert an 80 ms **host** `sleep` before the step (FlashAttention CuTe JIT stand-in). Record wall time vs CUDA-event GPU time.
+2. Detection: L1 sliding-window max/min ratio (≥2×) should fire; GPU time stays flat (host-bound); a window-mean L2/L3 view dilutes two rare spikes.
+3. Run:
+
+```bash
+uv run modal run playground/argus_cases_modal.py --case 4
+```
+
+4. Expect `Case4 L1=True spike_ratio≈45x stall_steps=[12, 27]`, with `gpu_median_ms ≈ normal wall` and spike walls ≈ 80 ms + step.
+
+**Our remasurement:** wall spike **~45×**; GPU event time ~1.8 ms throughout; L1 jitter fires.
 
 ![Case 4 remasurement](./case4_jit_stall.svg)
 
@@ -233,11 +297,15 @@ uv run modal run playground/argus_cases_modal.py
 
 **Paper (12,960-GPU MoE):** out-of-band “port down” looked like network; ARGUS showed pure-compute `mlp` degradation, with *shorter* ReduceScatter from late collective entry.
 
-**Why skipped:** the timing pattern (slow compute → late arrival → short measured collective) is composable from Cases 1+2; a faithful EP=32 schedule on one Modal GPU adds complexity without new detection math.
+**Reproduce (manual composition, no dedicated flag yet)**
+
+1. Take Case 1’s slow-compute ranks.
+2. Measure collective duration as `finish − max(arrive_i)` among participants: stragglers arrive late → the *measured* ReduceScatter window looks shorter for that EP group (secondary symptom), while compute-only phases stay long.
+3. Contrast with an out-of-band “link down” story: if only compute phases regress, remediation is node replace, not NIC repair.
+
+We did not wire a full EP=32 schedule on one Modal GPU — the detection insight is already covered by Cases 1+2.
 
 **Meta-lesson:** no single diagnostic level wins. ARGUS wins by **composition**.
-
-Raw case results: [argus_cases_results.json](./argus_cases_results.json) · code: [`argus_cases_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/argus_cases_modal.py)
 
 ## Mini Experiment: KDE + W₁ on a Simulated Straggler
 

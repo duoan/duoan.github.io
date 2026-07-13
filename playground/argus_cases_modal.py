@@ -10,8 +10,13 @@ Feasible without a 4k-GPU cluster:
 Usage::
 
     uv run modal run playground/argus_cases_modal.py
+    uv run modal run playground/argus_cases_modal.py --case 1
+    uv run modal run playground/argus_cases_modal.py --case 2
+    uv run modal run playground/argus_cases_modal.py --case 3
+    uv run modal run playground/argus_cases_modal.py --case 4
 
-Writes ``playground/argus_cases_results.json``.
+Writes ``playground/argus_cases_results.json`` (full run) or
+``playground/argus_cases_case{N}_results.json`` (single case).
 """
 
 from __future__ import annotations
@@ -376,36 +381,62 @@ def case4_jit_stall_gpu() -> dict:
 
 
 @app.function(gpu=GPU, image=image, timeout=900)
-def bench() -> dict:
+def bench(which: str = "all") -> dict:
     import torch
 
     rng = np.random.default_rng(0)
-    return {
-        "device": torch.cuda.get_device_name(0),
-        "case1": case1_compute_straggler(rng),
-        "case2": case2_link_degradation(rng),
-        "case3": case3_pp_bubble_masking(rng),
-        "case4": case4_jit_stall_gpu(),
-    }
+    device = torch.cuda.get_device_name(0)
+    out: dict = {"device": device, "which": which}
+    if which in ("all", "1"):
+        out["case1"] = case1_compute_straggler(rng)
+    if which in ("all", "2"):
+        out["case2"] = case2_link_degradation(rng)
+    if which in ("all", "3"):
+        out["case3"] = case3_pp_bubble_masking(rng)
+    if which in ("all", "4"):
+        out["case4"] = case4_jit_stall_gpu()
+    return out
+
+
+def _print_case(results: dict) -> None:
+    if "case1" in results:
+        c1 = results["case1"]
+        print(
+            f"Case1 L1={c1['l1_detected']} L2={c1['l2_detected']} "
+            f"flagged={c1['l2']['flagged_ranks']}"
+        )
+    if "case2" in results:
+        c2 = results["case2"]
+        print(
+            f"Case2 L1_silent={c2['l1_silent']} L3={c2['l3_detected']} "
+            f"flagged={c2['l3_flagged_union']} W1 inter/intra={c2['w1_inter_intra_ratio']:.1f}x"
+        )
+    if "case3" in results:
+        c3 = results["case3"]
+        print(
+            f"Case3 totals_silent={c3['l1_l2_silent_on_totals']} "
+            f"bwd_detected={c3['manual_semantics_detected']} "
+            f"ratio={c3['backward_ratio_vs_peers']:.2f}"
+        )
+    if "case4" in results:
+        c4 = results["case4"]
+        print(
+            f"Case4 L1={c4['l1_detected']} spike_ratio={c4['spike_ratio_vs_normal']:.1f}x "
+            f"stall_steps={c4['stall_steps']}"
+        )
 
 
 @app.local_entrypoint()
-def main() -> None:
-    out = Path("playground/argus_cases_results.json")
-    results = bench.remote()
+def main(case: str = "all") -> None:
+    """Run all cases, or one of: 1, 2, 3, 4."""
+    which = str(case).strip().lower()
+    if which not in {"all", "1", "2", "3", "4"}:
+        raise SystemExit(f"Unknown --case {case!r}; use all|1|2|3|4")
+    results = bench.remote(which)
+    if which == "all":
+        out = Path("playground/argus_cases_results.json")
+    else:
+        out = Path(f"playground/argus_cases_case{which}_results.json")
     out.write_text(json.dumps(results, indent=2))
     print(f"Wrote {out}")
-    c1, c2, c3, c4 = (results[k] for k in ("case1", "case2", "case3", "case4"))
-    print(f"Case1 L1={c1['l1_detected']} L2={c1['l2_detected']} flagged={c1['l2']['flagged_ranks']}")
-    print(
-        f"Case2 L1_silent={c2['l1_silent']} L3={c2['l3_detected']} "
-        f"flagged={c2['l3_flagged_union']} W1 inter/intra={c2['w1_inter_intra_ratio']:.1f}x"
-    )
-    print(
-        f"Case3 totals_silent={c3['l1_l2_silent_on_totals']} "
-        f"bwd_detected={c3['manual_semantics_detected']} ratio={c3['backward_ratio_vs_peers']:.2f}"
-    )
-    print(
-        f"Case4 L1={c4['l1_detected']} spike_ratio={c4['spike_ratio_vs_normal']:.1f}x "
-        f"stall_steps={c4['stall_steps']}"
-    )
+    _print_case(results)
