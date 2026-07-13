@@ -168,11 +168,23 @@ def rank_deviation_scores(rank_summaries: list[dict], kernel: str, stream: int) 
     return scores
 
 
-def iqr_outliers(scores: list[float], alpha: float = 1.5) -> list[int]:
+def iqr_outliers(
+    scores: list[float],
+    alpha: float = 1.5,
+    min_ratio_vs_median: float = 2.0,
+) -> list[int]:
+    """IQR fence plus a relative-elevation gate.
+
+    With only a few ranks, healthy scores sit in a tight band and ordinary
+    timing jitter can trip Tukey's fence. Require both: above the upper fence
+    *and* at least ``min_ratio_vs_median`` times the median score.
+    """
     arr = np.asarray(scores, dtype=np.float64)
     q1, q3 = np.percentile(arr, [25, 75])
     fence = q3 + alpha * (q3 - q1)
-    return [i for i, s in enumerate(scores) if s > fence]
+    med = float(np.median(arr))
+    floor = med * min_ratio_vs_median if med > 0 else fence
+    return [i for i, s in enumerate(scores) if s > fence and s >= floor]
 
 
 @app.function(gpu=GPU, image=image, timeout=600)
@@ -205,9 +217,17 @@ def bench() -> dict:
         end.synchronize()
         return name, stream_id, start.elapsed_time(end)
 
-    # Collect repeated op timings — mimics per-window kernel events on one rank.
+    # Warm up, then collect repeated op timings — mimics per-window kernel events.
     baseline_events: list[tuple[str, int, float]] = []
     x = torch.randn(batch, seq, hidden, device=device, dtype=torch.bfloat16)
+    for _ in range(20):
+        out = model(x)
+        loss = out.square().mean()
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        opt.step()
+    torch.cuda.synchronize()
+
     for _ in range(120):
         out = model(x)
         loss = out.square().mean()
@@ -215,10 +235,13 @@ def bench() -> dict:
         loss.backward()
         opt.step()
 
+        h1 = model[0](x)
         baseline_events.append(timed_op("gemm_fc1", 0, lambda: model[0](x)))
-        baseline_events.append(timed_op("gelu", 0, lambda: model[1](model[0](x))))
-        baseline_events.append(timed_op("gemm_fc2", 0, lambda: model[2](model[1](model[0](x)))))
-        baseline_events.append(timed_op("layernorm", 1, lambda: model[3](model[2](model[1](model[0](x))))))
+        baseline_events.append(timed_op("gelu", 0, lambda h1=h1: model[1](h1)))
+        h2 = model[1](h1)
+        baseline_events.append(timed_op("gemm_fc2", 0, lambda h2=h2: model[2](h2)))
+        h3 = model[2](h2)
+        baseline_events.append(timed_op("layernorm", 1, lambda h3=h3: model[3](h3)))
 
     # Simulate 8 DP ranks: rank 5 is a compute straggler on GEMM kernels.
     n_ranks = 8

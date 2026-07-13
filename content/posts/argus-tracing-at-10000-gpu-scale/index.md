@@ -182,29 +182,30 @@ The full ARGUS stack needs CUPTI injection, Vector, Grafana, and thousands of ra
 Code: [`playground/argus_demo_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/argus_demo_modal.py)
 
 ```bash
-# GPU collection on Modal (when authenticated):
+# GPU collection on Modal:
 uv run modal run playground/argus_demo_modal.py
 
-# Local fallback (synthetic timings, same algorithms):
+# Local fallback if Modal is unavailable (synthetic timings, same algorithms):
 uv run python playground/argus_demo_modal.py
 ```
 
 The demo:
 
-1. Collects (or synthesizes) repeated kernel durations for a tiny MLP-like loop — `gemm_fc1`, `gelu`, `gemm_fc2`, `layernorm`.
+1. Collects repeated CUDA Event timings for a tiny MLP-like loop on Modal (`gemm_fc1`, `gelu`, `gemm_fc2`, `layernorm`).
 2. Simulates **8 DP ranks**, injecting a **2.8× slowdown** on GEMM kernels for rank 5.
 3. Runs KDE clustering + `(count, p50, p99)` compression.
-4. Runs L3-style **W₁ + IQR** detection on `gemm_fc1`.
+4. Runs L3-style **W₁ + IQR** detection on `gemm_fc1` (with a relative-elevation gate so tiny timing jitter on healthy ranks does not false-positive at N=8).
 
-Results bundled with this post: [argus_demo_results.json](./argus_demo_results.json)
+Results below are from a Modal **A10G** run ([argus_demo_results.json](./argus_demo_results.json)):
 
 | Metric | Value |
 |---|---|
+| Device | NVIDIA A10G (Modal) |
 | Events per rank | 480 |
-| Mean compression ratio | **~108×** (demo scale; paper reports ~3,700× at full CUPTI volume) |
+| Mean compression ratio | **~58×** (demo scale; paper reports ~3,700× at full CUPTI volume) |
 | True straggler rank | 5 |
 | L3 flagged ranks | **[5]** |
-| Rank 5 mean W₁ deviation score | **0.747** vs ~**0.11** for healthy ranks |
+| Rank 5 mean W₁ deviation score | **2.32** vs ~**0.36** for healthy ranks |
 
 ![KDE clustering compresses kernel durations into statistical modes](./kde_compression.svg)
 
