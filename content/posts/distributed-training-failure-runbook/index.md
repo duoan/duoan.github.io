@@ -34,12 +34,12 @@ I built a small lab that injects each failure on purpose and measures the debug 
 Code: [`playground/dist_failure_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/dist_failure_modal.py)
 
 ```bash
-# Local CPU/gloo lab (no GPU required):
-uv run python playground/dist_failure_modal.py
-uv run python playground/dist_failure_modal.py --case nan
-
-# Modal GPU path (NCCL when ≥2 GPUs):
+# Modal (default: 2×A10G, NCCL) — this post's numbers:
 uv run modal run playground/dist_failure_modal.py
+uv run modal run playground/dist_failure_modal.py --case nan
+
+# Local CPU/gloo fallback:
+uv run python playground/dist_failure_modal.py
 
 # Figures:
 uv run python playground/dist_failure_figures.py \
@@ -57,7 +57,8 @@ The missing piece is a **symptom → hypothesis → probe → fix** loop. This p
 
 ### Lab assumptions
 
-- **2 ranks**, PyTorch `2.12`, backend **`gloo` on CPU** for the committed numbers (same scripts prefer **NCCL** on Modal when ≥2 GPUs).
+- **Modal 2×A10G**, PyTorch `2.11+cu130`, backend **`nccl`**, `world_size=2` — committed numbers in this post.
+- Same script falls back to **CPU/`gloo`** via `uv run python playground/dist_failure_modal.py` when you have no GPU.
 - Tiny MLP + synthetic data. The bugs are real; the model is not.
 - Results: [dist_failure_results.json](./dist_failure_results.json)
 
@@ -138,7 +139,7 @@ NaN is not one bug. The lab runs an **11-recipe catalog** of the failures that s
 
 **Inject:** multiply features by `1e3` on steps `{12, 27}` (stand-in for bad tokenization, unnormalized images, corrupted shards).
 
-**Lab result:** median loss ≈ `2.31`; spikes **68×** and **52×**.
+**Lab result:** median loss ≈ `2.31`; spikes **106×** and **59×**.
 
 ### Debug checklist
 
@@ -186,7 +187,7 @@ NaN is not one bug. The lab runs an **11-recipe catalog** of the failures that s
 
 **Inject:** append detached activations (+ inputs) to a list “for later visualization”.
 
-**Lab result:** retained memory grows **+5.1 MB** over 40 steps (monotonic). Fixed path clears the debug buffer each step and stays flat.
+**Lab result:** CUDA `memory_allocated` grows **+5.1 MB** over 40 steps; fixed path stays flat at ~18.9 MB.
 
 ### Debug checklist
 
@@ -211,7 +212,7 @@ NaN is not one bug. The lab runs an **11-recipe catalog** of the failures that s
 
 ![Straggler and bad node](./straggler_and_bad_node.svg)
 
-**Lab result:** collective wait median **0.32 ms → 121 ms** (~**382×**) on **both** ranks. The healthy rank is just as slow on the wall clock — that is the point.
+**Lab result:** collective wait median **0.1 ms → 120 ms** (~**1377×**) on **both** ranks. The healthy rank is just as slow on the wall clock — that is the point.
 
 ### Debug checklist
 
@@ -234,7 +235,7 @@ NaN is not one bug. The lab runs an **11-recipe catalog** of the failures that s
 
 **Inject:** rank 0 runs extra local matmul loops before the step; detect via all-gathered local timer ratios.
 
-**Lab result:** flagged rank `[0]` at **~15,900×** vs the fastest peer’s local timer.
+**Lab result:** flagged rank `[0]` at **~2400×** vs the fastest peer’s local timer.
 
 ### Debug checklist
 
@@ -254,11 +255,11 @@ NaN is not one bug. The lab runs an **11-recipe catalog** of the failures that s
 
 **Symptom:** ranks stuck in `ncclAllReduce` / `AllGather`; timeout after minutes; or immediate `Connection closed by peer` when a process dies.
 
-**Inject:** healthy allreduce once, then rank 1 exits before the next collective. Rank 0 surfaces a peer-closed error (gloo) — the NCCL analogue is timeout / bus error / async exception.
+**Inject:** healthy allreduce once, then rank 1 exits before the next collective. Rank 0 blocks inside NCCL until the lab watchdog kills it (production: NCCL timeout / async error handling).
 
 ![Hang timeline and throughput cliff](./hang_and_throughput_cliff.svg)
 
-**Lab result:** hang confirmed; peer error `Connection closed by peer`.
+**Lab result:** hang confirmed on Modal NCCL — timed out ranks `[0]` after rank 1 exited.
 
 ### Debug checklist
 
@@ -282,7 +283,7 @@ NaN is not one bug. The lab runs an **11-recipe catalog** of the failures that s
 
 **Inject:** fixed **8 MB** extra allreduce each step; sweep per-rank batch size `1…128`.
 
-**Lab result:** peak at bs=`128` (~**2372** samples/s); bs=`1` is ~**1.2%** of peak — a cliff, not a gentle slope.
+**Lab result:** peak at bs=`128` (~**28.3k** samples/s); bs=`1` is ~**0.8%** of peak — a cliff, not a gentle slope.
 
 ### Debug checklist
 
@@ -348,4 +349,4 @@ Want a ninth case? The same harness is the right place: inject one bug, assert o
 4. **Unbounded tensor retention** is still the most common slow OOM.
 5. **Repro beats folklore** — if you cannot inject it in 100 lines, you do not understand it yet.
 
-The committed numbers here are from the CPU/`gloo` path so anyone can re-run without a cluster. The Modal entrypoint is the same code with NCCL when multiple GPUs show up — use it when you need GPU-realistic AMP/NCCL timing, not when you only need the failure shape.
+The committed numbers here are from **Modal 2×A10G + NCCL**. The same script still runs on CPU/`gloo` locally when you just want the failure shape without GPUs.

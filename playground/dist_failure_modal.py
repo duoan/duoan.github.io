@@ -17,9 +17,9 @@ Usage (from repo root)::
     uv run python playground/dist_failure_modal.py
     uv run python playground/dist_failure_modal.py --case nan
 
-    # Modal GPU path (same cases; NCCL when multi-GPU is available):
+    # Modal GPU path (2×A10G → NCCL; override with DIST_FAIL_GPU):
     uv run modal run playground/dist_failure_modal.py
-    DIST_FAIL_GPU=A10G uv run modal run playground/dist_failure_modal.py
+    DIST_FAIL_GPU=A10G:2 uv run modal run playground/dist_failure_modal.py
 
 Writes ``playground/dist_failure_results.json``.
 """
@@ -43,7 +43,9 @@ import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
 
-GPU = os.environ.get("DIST_FAIL_GPU", "A10G")
+# Default to 2 GPUs so NCCL multi-process demos are real. Single-GPU slots fall
+# back to gloo (CPU collectives) inside the container.
+GPU = os.environ.get("DIST_FAIL_GPU", "A10G:2")
 CASES = (
     "nan",
     "loss_spike",
@@ -86,6 +88,12 @@ def _mlp(dim: int = 64, n_classes: int = 10) -> nn.Module:
     )
 
 
+def _wrap_ddp(model: nn.Module, device: torch.device) -> nn.Module:
+    if device.type == "cuda":
+        return nn.parallel.DistributedDataParallel(model, device_ids=[device.index])
+    return nn.parallel.DistributedDataParallel(model)
+
+
 def _init_pg(rank: int, world_size: int, backend: str, port: int) -> None:
     os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
     os.environ["MASTER_PORT"] = str(port)
@@ -102,8 +110,12 @@ def _param_checksum(model: nn.Module) -> float:
 def _max_param_diff(model: nn.Module) -> float:
     """All-reduce max abs diff of each param vs rank-0 snapshot (via allgather)."""
     diffs: list[float] = []
+    backend = dist.get_backend()
+    device = next(model.parameters()).device
     for p in model.parameters():
-        flat = p.detach().float().reshape(-1).cpu()
+        flat = p.detach().float().reshape(-1)
+        # NCCL only accepts CUDA tensors; gloo wants CPU.
+        flat = flat.to(device if backend == "nccl" else "cpu")
         gathered = [torch.zeros_like(flat) for _ in range(dist.get_world_size())]
         dist.all_gather(gathered, flat)
         ref = gathered[0]
@@ -423,7 +435,7 @@ def _recipe_optimizer_nan_moment(device: torch.device) -> dict:
 
 def _recipe_ddp_nan_contagion(rank: int, model: nn.Module, device: torch.device) -> dict:
     """One rank injects NaN grads → allreduce spreads them to every replica."""
-    ddp = nn.parallel.DistributedDataParallel(model)
+    ddp = _wrap_ddp(model, device)
     opt = torch.optim.SGD(ddp.parameters(), lr=0.1)
     x = torch.randn(8, 32, device=device)
     y = torch.randint(0, 5, (8,), device=device)
@@ -494,7 +506,7 @@ def case_nan(rank: int, world_size: int, backend: str, port: int) -> dict:
     # Healthy control: fp32 + mild LR + clip.
     torch.manual_seed(0)
     model_ok = _mlp(32, 5).to(device)
-    ddp_ok = nn.parallel.DistributedDataParallel(model_ok)
+    ddp_ok = _wrap_ddp(model_ok, device)
     opt_ok = torch.optim.SGD(ddp_ok.parameters(), lr=0.05)
     losses_ok: list[float] = []
     for _step in range(20):
@@ -555,7 +567,7 @@ def case_loss_spike(rank: int, world_size: int, backend: str, port: int) -> dict
 
     torch.manual_seed(0 + rank)
     model = _mlp(64, 10).to(device)
-    ddp = nn.parallel.DistributedDataParallel(model)
+    ddp = _wrap_ddp(model, device)
     opt = torch.optim.AdamW(ddp.parameters(), lr=1e-3)
 
     spike_steps = {12, 27}
@@ -606,7 +618,7 @@ def case_numerical_drift(rank: int, world_size: int, backend: str, port: int) ->
 
     torch.manual_seed(0)
     model = _mlp(48, 8).to(device)
-    ddp = nn.parallel.DistributedDataParallel(model)
+    ddp = _wrap_ddp(model, device)
     opt = torch.optim.SGD(ddp.parameters(), lr=0.05)
 
     onset = 10
@@ -657,7 +669,7 @@ def case_memory_leak(rank: int, world_size: int, backend: str, port: int) -> dic
 
     torch.manual_seed(0)
     model = _mlp(256, 10).to(device)
-    ddp = nn.parallel.DistributedDataParallel(model)
+    ddp = _wrap_ddp(model, device)
     opt = torch.optim.SGD(ddp.parameters(), lr=0.01)
 
     leak_bucket: list[torch.Tensor] = []
@@ -700,8 +712,10 @@ def case_memory_leak(rank: int, world_size: int, backend: str, port: int) -> dic
             )
 
     growth = allocated[-1] - allocated[0]
-    # Monotonic leak: last ≥ 5× first (and absolute growth ≥ 1 MB).
-    leak_detected = allocated[-1] >= max(5.0 * max(allocated[0], 1e-6), allocated[0] + 1.0)
+    fixed_growth = allocated_fixed[-1] - allocated_fixed[0]
+    # CUDA caching allocator keeps a large baseline; detect by absolute growth
+    # vs a fixed (non-retaining) control rather than a 5× ratio.
+    leak_detected = growth >= 1.0 and growth > fixed_growth + 0.5
     out = {
         "case": "memory_leak",
         "rank": rank,
@@ -710,8 +724,9 @@ def case_memory_leak(rank: int, world_size: int, backend: str, port: int) -> dic
         "allocated_mb_leaky": allocated,
         "allocated_mb_fixed": allocated_fixed,
         "growth_mb": growth,
+        "fixed_growth_mb": fixed_growth,
         "leak_detected": leak_detected,
-        "fixed_flat": allocated_fixed[-1] <= allocated_fixed[0] + 0.1,
+        "fixed_flat": abs(fixed_growth) <= 0.5,
         "fix": "track cuda.memory_allocated / RSS over steps; never retain graph tensors",
     }
     dist.destroy_process_group()
@@ -727,7 +742,7 @@ def case_straggler(rank: int, world_size: int, backend: str, port: int) -> dict:
 
     torch.manual_seed(0)
     model = _mlp(32, 5).to(device)
-    ddp = nn.parallel.DistributedDataParallel(model)
+    ddp = _wrap_ddp(model, device)
     opt = torch.optim.SGD(ddp.parameters(), lr=0.05)
 
     straggler = 1 if world_size > 1 else 0
@@ -789,7 +804,7 @@ def case_bad_node(rank: int, world_size: int, backend: str, port: int) -> dict:
 
     torch.manual_seed(0)
     model = _mlp(96, 10).to(device)
-    ddp = nn.parallel.DistributedDataParallel(model)
+    ddp = _wrap_ddp(model, device)
     opt = torch.optim.SGD(ddp.parameters(), lr=0.05)
 
     bad = 0
@@ -819,7 +834,11 @@ def case_bad_node(rank: int, world_size: int, backend: str, port: int) -> dict:
         step_ms.append((t2 - t0) * 1e3)
 
     # Gather per-rank local compute means for detection.
-    local_mean = torch.tensor([float(np.mean(local_ms))], dtype=torch.float64)
+    local_mean = torch.tensor(
+        [float(np.mean(local_ms))],
+        dtype=torch.float32,
+        device=device if backend == "nccl" else "cpu",
+    )
     gathered = [torch.zeros_like(local_mean) for _ in range(world_size)]
     dist.all_gather(gathered, local_mean)
     means = [float(t.item()) for t in gathered]
@@ -868,19 +887,28 @@ def case_nccl_hang(rank: int, world_size: int, backend: str, port: int) -> dict:
     error: str | None = None
     elapsed_ms = 0.0
     if rank == hang_rank:
-        # Simulate a dead worker: exit without destroying PG (peer sees timeout).
+        # Dead worker: do not destroy the PG (NCCL destroy would also hang).
         time.sleep(0.05)
-        error = "simulated_rank_exit_before_collective"
-    else:
-        t0 = time.perf_counter()
-        try:
-            # Wait briefly for peer; use a second allreduce that will block.
-            # Multiprocessing parent enforces overall timeout via join.
-            dist.all_reduce(torch.ones(1, device=device))
-            # If we somehow proceed (ws=1), mark not hung.
-        except Exception as e:  # noqa: BLE001
-            error = f"{type(e).__name__}: {e}"
-        elapsed_ms = (time.perf_counter() - t0) * 1e3
+        return {
+            "case": "nccl_hang",
+            "rank": rank,
+            "backend": backend,
+            "hang_rank": hang_rank,
+            "healthy_collective_ok": healthy_ok,
+            "timeout_s": timeout_s,
+            "peer_wait_ms": 0.0,
+            "hang_injected": True,
+            "error": "simulated_rank_exit_before_collective",
+            "fix": "NCCL_DEBUG=INFO, TORCH_NCCL_ASYNC_ERROR_HANDLING=1, per-rank heartbeats",
+        }
+
+    t0 = time.perf_counter()
+    try:
+        # Peer has left — this allreduce blocks until the parent watchdog kills us.
+        dist.all_reduce(torch.ones(1, device=device))
+    except Exception as e:  # noqa: BLE001
+        error = f"{type(e).__name__}: {e}"
+    elapsed_ms = (time.perf_counter() - t0) * 1e3
 
     out = {
         "case": "nccl_hang",
@@ -894,7 +922,6 @@ def case_nccl_hang(rank: int, world_size: int, backend: str, port: int) -> dict:
         "error": error,
         "fix": "NCCL_DEBUG=INFO, TORCH_NCCL_ASYNC_ERROR_HANDLING=1, per-rank heartbeats",
     }
-    # Non-hang ranks may still be blocked; parent kills the process group.
     with contextlib.suppress(Exception):
         dist.destroy_process_group()
     return out
@@ -909,7 +936,7 @@ def case_throughput_cliff(rank: int, world_size: int, backend: str, port: int) -
 
     torch.manual_seed(0)
     model = _mlp(128, 10).to(device)
-    ddp = nn.parallel.DistributedDataParallel(model)
+    ddp = _wrap_ddp(model, device)
     opt = torch.optim.SGD(ddp.parameters(), lr=0.01)
 
     # Extra collective payload to make the cliff obvious on CPU/gloo.
@@ -1136,7 +1163,12 @@ def bench(which: str = "all") -> dict:
     prefer = torch.cuda.is_available()
     n_gpu = torch.cuda.device_count() if prefer else 0
     prefer_nccl = prefer and n_gpu >= 2
+    # NCCL needs ≥2 ranks on distinct devices; gloo fallback uses 2 CPU ranks.
     ws = 2
+    print(
+        f"modal bench: device={torch.cuda.get_device_name(0) if prefer else 'cpu'} "
+        f"n_gpu={n_gpu} backend={'nccl' if prefer_nccl else 'gloo'} ws={ws}"
+    )
     if which == "all":
         results = run_all(world_size=ws, prefer_nccl=prefer_nccl)
     else:
@@ -1145,14 +1177,18 @@ def bench(which: str = "all") -> dict:
                 "torch": torch.__version__,
                 "cuda_available": prefer,
                 "device_name": torch.cuda.get_device_name(0) if prefer else "cpu",
+                "n_gpu": n_gpu,
                 "world_size": ws,
                 "prefer_nccl": prefer_nccl,
                 "backend": _backend(prefer_nccl),
-                "source": "modal",
+                "gpu_slot": GPU,
             },
             "cases": {which: run_case(which, world_size=ws, prefer_nccl=prefer_nccl)},
         }
+    results.setdefault("meta", {})
     results["meta"]["source"] = "modal"
+    results["meta"]["gpu_slot"] = GPU
+    results["meta"]["n_gpu"] = n_gpu
     return results
 
 
@@ -1182,17 +1218,26 @@ def _print_summary(results: dict) -> None:
         elif name == "loss_spike":
             print(f"  loss_spike: detected={p.get('detected')} ratios={p.get('spike_ratio_vs_median')}")
         elif name == "numerical_drift":
+            diff = p.get("final_max_param_diff")
             print(
                 f"  drift: detected={p.get('drift_detected')} "
-                f"final_diff={p.get('final_max_param_diff'):.3e}"
+                f"final_diff={diff if diff is None else f'{diff:.3e}'}"
             )
         elif name == "memory_leak":
-            print(f"  leak: detected={p.get('leak_detected')} growth_mb={p.get('growth_mb'):.1f}")
+            growth = p.get("growth_mb")
+            print(
+                f"  leak: detected={p.get('leak_detected')} "
+                f"growth_mb={growth if growth is None else f'{growth:.1f}'}"
+            )
         elif name == "straggler":
+            slow = p.get("slowdown")
+            pre = p.get("pre_median_ms")
+            post = p.get("post_median_ms")
             print(
                 f"  straggler: detected={p.get('detected')} "
-                f"slowdown={p.get('slowdown'):.2f}x "
-                f"pre={p.get('pre_median_ms'):.1f}ms post={p.get('post_median_ms'):.1f}ms"
+                f"slowdown={slow if slow is None else f'{slow:.2f}x'} "
+                f"pre={pre if pre is None else f'{pre:.1f}ms'} "
+                f"post={post if post is None else f'{post:.1f}ms'}"
             )
         elif name == "bad_node":
             print(
@@ -1202,10 +1247,11 @@ def _print_summary(results: dict) -> None:
         elif name == "nccl_hang":
             print(f"  nccl_hang: confirmed={c.get('hang_confirmed')} {c.get('symptom')}")
         elif name == "throughput_cliff":
+            ratio = p.get("cliff_ratio_vs_peak")
             print(
                 f"  cliff: peak_bs={p.get('peak_batch_size')} "
                 f"cliff_bs={p.get('cliff_batch_size')} "
-                f"ratio={p.get('cliff_ratio_vs_peak'):.2f}"
+                f"ratio={ratio if ratio is None else f'{ratio:.2f}'}"
             )
 
 

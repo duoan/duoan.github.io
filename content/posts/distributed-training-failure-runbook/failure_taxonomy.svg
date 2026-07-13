@@ -6,7 +6,7 @@
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
     <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
-    <dc:date>2026-07-13T05:22:41.770593</dc:date>
+    <dc:date>2026-07-13T05:30:50.183227</dc:date>
     <dc:format>image/svg+xml</dc:format>
     <dc:creator>
      <cc:Agent>
@@ -35,7 +35,7 @@ L 241.5168 273.102
 L 241.5168 83.172 
 L 29.1672 83.172 
 z
-" clip-path="url(#p01748a2b14)" style="fill: #dbeafe; stroke: #2563eb; stroke-width: 1.5; stroke-linejoin: miter"/>
+" clip-path="url(#p74f7dd1dea)" style="fill: #dbeafe; stroke: #2563eb; stroke-width: 1.5; stroke-linejoin: miter"/>
    </g>
    <g id="patch_3">
     <path d="M 263.484 223.428 
@@ -43,7 +43,7 @@ L 475.8336 223.428
 L 475.8336 83.172 
 L 263.484 83.172 
 z
-" clip-path="url(#p01748a2b14)" style="fill: #ffedd5; stroke: #d97706; stroke-width: 1.5; stroke-linejoin: miter"/>
+" clip-path="url(#p74f7dd1dea)" style="fill: #ffedd5; stroke: #d97706; stroke-width: 1.5; stroke-linejoin: miter"/>
    </g>
    <g id="patch_4">
     <path d="M 497.8008 273.102 
@@ -51,7 +51,7 @@ L 710.1504 273.102
 L 710.1504 83.172 
 L 497.8008 83.172 
 z
-" clip-path="url(#p01748a2b14)" style="fill: #fee2e2; stroke: #dc2626; stroke-width: 1.5; stroke-linejoin: miter"/>
+" clip-path="url(#p74f7dd1dea)" style="fill: #fee2e2; stroke: #dc2626; stroke-width: 1.5; stroke-linejoin: miter"/>
    </g>
    <g id="text_1">
     <text style="font-size: 14px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f172a" x="373.32" y="30.576" transform="rotate(-0 373.32 30.576)">Distributed training failure taxonomy</text>
@@ -116,7 +116,7 @@ z
   </g>
  </g>
  <defs>
-  <clipPath id="p01748a2b14">
+  <clipPath id="p74f7dd1dea">
    <rect x="7.2" y="7.2" width="732.24" height="350.64"/>
   </clipPath>
  </defs>
