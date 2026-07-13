@@ -62,9 +62,9 @@ def taxonomy_figure(out: Path) -> None:
             0.3,
             4.2,
             [
-                ("NaN / Inf", "11-recipe catalog"),
-                ("Loss spikes", "corrupt batch / outlier"),
-                ("Silent drift", "rank0-only clip / BN buffers"),
+                ("Silent drift", "rank0 clip / EMA copy-back"),
+                ("Loss spikes", "z-loss / aux weight typo"),
+                ("NaN / Inf", "attn/mask/AMP/Adam/DDP"),
             ],
             "#dbeafe",
             C_BLUE,
@@ -207,7 +207,7 @@ def nan_and_spike_figure(results: dict, out: Path) -> None:
     ax.axhline(spike["median_loss"], color=C_SLATE, ls=":", lw=1)
     ax.set_xlabel("step")
     ax.set_ylabel("loss")
-    ax.set_title("(b) Loss spikes from corrupt batches")
+    ax.set_title("(b) Loss spikes from z-loss weight typo")
 
     fig.tight_layout()
     fig.savefig(out / "nan_and_loss_spike.svg", bbox_inches="tight")
@@ -237,27 +237,28 @@ def drift_and_leak_figure(results: dict, out: Path) -> None:
             lw=1.8,
             label="clip on all ranks",
         )
-    if "bn_max_buffer_diff" in drift:
+    if "ema_student_param_diff" in drift:
+        ax.semilogy(
+            np.arange(len(drift["ema_student_param_diff"])),
+            np.maximum(np.asarray(drift["ema_student_param_diff"], dtype=np.float64), 1e-12),
+            color=C_AMBER,
+            lw=2,
+            ls="--",
+            label="EMA→student copy on rank0",
+        )
+    elif "bn_max_buffer_diff" in drift:
         ax.semilogy(
             np.arange(len(drift["bn_max_buffer_diff"])),
             np.maximum(np.asarray(drift["bn_max_buffer_diff"], dtype=np.float64), 1e-12),
             color=C_AMBER,
             lw=2,
             ls="--",
-            label="BN buffers (broadcast_buffers=False)",
+            label="second drift series",
         )
-        if "bn_max_param_diff" in drift:
-            ax.semilogy(
-                np.arange(len(drift["bn_max_param_diff"])),
-                np.maximum(np.asarray(drift["bn_max_param_diff"], dtype=np.float64), 1e-12),
-                color=C_SLATE,
-                lw=1.4,
-                label="BN affine params (still synced)",
-            )
-    ax.axvline(drift["onset_step"], color=C_PURPLE, ls=":", label="clip onset")
+    ax.axvline(drift["onset_step"], color=C_PURPLE, ls=":", label="onset")
     ax.set_xlabel("step")
-    ax.set_ylabel("max |Δ| across ranks")
-    ax.set_title("(a) Real silent drift: clip / BN buffers")
+    ax.set_ylabel("max |Δparam| across ranks")
+    ax.set_title("(a) Real silent drift on TinyTransformerLM")
     ax.legend(frameon=False, fontsize=7.5, loc="best")
 
     ax = axes[1]
@@ -282,16 +283,17 @@ def straggler_bad_node_figure(results: dict, out: Path) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.0))
 
     ax = axes[0]
-    # Plot both ranks' collective wait.
+    # Per-rank forward time (local compute) — seqlen skew shows up here.
     for r in results["cases"]["straggler"]["ranks"]:
-        ys = np.asarray(r["collective_ms"], dtype=np.float64)
+        key = "local_compute_ms" if "local_compute_ms" in r else "collective_ms"
+        ys = np.asarray(r[key], dtype=np.float64)
         color = C_RED if r["rank"] == st["straggler_rank"] else C_BLUE
-        label = f"rank {r['rank']}" + (" (straggler)" if r["rank"] == st["straggler_rank"] else "")
+        label = f"rank {r['rank']}" + (" (long-doc)" if r["rank"] == st["straggler_rank"] else " (short)")
         ax.plot(np.arange(len(ys)), ys, "-o", color=color, ms=4, lw=1.8, label=label)
     ax.axvline(st["onset_step"], color=C_AMBER, ls="--")
     ax.set_xlabel("step")
-    ax.set_ylabel("collective wait (ms)")
-    ax.set_title("(a) Straggler paces the collective")
+    ax.set_ylabel("forward time (ms)")
+    ax.set_title("(a) Straggler from seqlen skew")
     ax.legend(frameon=False, fontsize=9)
 
     ax = axes[1]
@@ -302,7 +304,7 @@ def straggler_bad_node_figure(results: dict, out: Path) -> None:
     ax.set_xticks(ranks)
     ax.set_xticklabels([f"rank {i}" for i in ranks])
     ax.set_ylabel("local compute before collective (ms)")
-    ax.set_title("(b) Bad-node detection via local timers")
+    ax.set_title("(b) Host-skew 'bad node' via local timers")
     for i, m in enumerate(means):
         ax.text(
             i,
@@ -343,12 +345,12 @@ def hang_and_cliff_figure(results: dict, out: Path) -> None:
 
     # Rank 1 exits
     ax.scatter([4.0], [2.2], color=C_RED, s=120, zorder=5, marker="x", linewidths=3)
-    ax.text(4.0, 1.4, "rank exits\n(before collective)", ha="center", fontsize=9, color=C_RED)
+    ax.text(4.0, 1.4, "empty pack\ncontinue", ha="center", fontsize=9, color=C_RED)
 
     # Rank 0 waits then errors
     ax.plot([4.0, 7.2], [4.2, 4.2], color=C_AMBER, lw=8, solid_capstyle="butt")
     ax.scatter([7.2], [4.2], color=C_RED, s=90, zorder=5)
-    ax.text(5.6, 4.85, "blocked → peer closed", ha="center", fontsize=9, color=C_AMBER)
+    ax.text(5.6, 4.85, "blocked in DDP/NCCL", ha="center", fontsize=9, color=C_AMBER)
 
     symptom = hang.get("symptom", "")
     short = symptom if len(symptom) < 70 else symptom[:67] + "…"
@@ -356,15 +358,23 @@ def hang_and_cliff_figure(results: dict, out: Path) -> None:
 
     ax = axes[1]
     sweep = cliff["sweep"]
-    bs = [r["batch_size_per_rank"] for r in sweep]
-    sps = [r["samples_per_s"] for r in sweep]
-    ax.plot(bs, sps, "-o", color=C_BLUE, lw=2, ms=6)
+    if "tokens_per_rank" in sweep[0]:
+        xs = [r["tokens_per_rank"] for r in sweep]
+        ys = [r.get("tokens_per_s", r.get("samples_per_s")) for r in sweep]
+        xlabel = "tokens / rank"
+        ylabel = "tokens / s"
+    else:
+        xs = [r["batch_size_per_rank"] for r in sweep]
+        ys = [r["samples_per_s"] for r in sweep]
+        xlabel = "batch size / rank"
+        ylabel = "samples / s"
+    ax.plot(xs, ys, "-o", color=C_BLUE, lw=2, ms=6)
     ax.axvline(cliff["cliff_batch_size"], color=C_RED, ls="--", label="cliff (tiny microbatch)")
     ax.axvline(cliff["peak_batch_size"], color=C_GREEN, ls=":", label="peak throughput")
     ax.set_xscale("log", base=2)
-    ax.set_xlabel("batch size / rank")
-    ax.set_ylabel("samples / s")
-    ax.set_title("(b) Throughput cliff vs microbatch")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    ax.set_title("(b) Throughput cliff vs tokens/rank")
     ax.legend(frameon=False, fontsize=9)
 
     fig.tight_layout()

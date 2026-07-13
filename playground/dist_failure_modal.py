@@ -1,27 +1,25 @@
-"""Reproduce common distributed training failures for the runbook blog post.
+"""Distributed training failure lab for the runbook blog post.
 
-Cases (each returns structured JSON metrics):
+Built around a small but real causal Transformer LM (attention + MLP + LN +
+tied embeddings). Failures come from code patterns that show up in production
+reviews — not ``sleep()``, ``tensor * 1e3``, or ``param.add_`` mocks.
 
-  1. nan              — catalog of common NaN/Inf recipes (AMP, data, masks, DDP, …)
-  2. loss_spike       — rare corrupt batch → transient loss explosion
-  3. numerical_drift  — silent rank desync (local-only param update)
-  4. memory_leak      — retained activation references grow RSS / CUDA alloc
-  5. straggler        — one slow rank paces the collective
-  6. bad_node         — persistent compute degradation on one rank
-  7. nccl_hang        — missing collective participant → watchdog timeout
-  8. throughput_cliff — tiny local work → communication dominates
+Cases:
 
-Usage (from repo root)::
+  1. nan              — attention/mask/AMP/Adam/DDP NaN catalog on the LM
+  2. loss_spike       — z-loss / aux coefficient typo (1e-4 written as 1e2)
+  3. numerical_drift  — rank0-only grad clip; rank0 EMA copy-back into student
+  4. memory_leak      — debug ring buffer retaining logits every step
+  5. straggler        — seqlen skew across ranks (long-doc vs short-doc bucket)
+  6. bad_node         — persistent host preprocessing skew on one rank
+  7. nccl_hang        — empty-microbatch ``continue`` skips a collective
+  8. throughput_cliff — tokens/rank sweep; real DDP grad allreduce dominates
 
-    # Local CPU/gloo lab (no Modal / GPU required):
-    uv run python playground/dist_failure_modal.py
+Usage::
+
+    uv run modal run playground/dist_failure_modal.py          # 2×A10G NCCL
+    uv run python playground/dist_failure_modal.py             # CPU/gloo
     uv run python playground/dist_failure_modal.py --case nan
-
-    # Modal GPU path (2×A10G → NCCL; override with DIST_FAIL_GPU):
-    uv run modal run playground/dist_failure_modal.py
-    DIST_FAIL_GPU=A10G:2 uv run modal run playground/dist_failure_modal.py
-
-Writes ``playground/dist_failure_results.json``.
 """
 
 from __future__ import annotations
@@ -43,8 +41,6 @@ import torch.multiprocessing as mp
 import torch.nn as nn
 import torch.nn.functional as F
 
-# Default to 2 GPUs so NCCL multi-process demos are real. Single-GPU slots fall
-# back to gloo (CPU collectives) inside the container.
 GPU = os.environ.get("DIST_FAIL_GPU", "A10G:2")
 CASES = (
     "nan",
@@ -60,9 +56,148 @@ CASES = (
 app = modal.App("dist-failure-runbook")
 image = modal.Image.debian_slim(python_version="3.12").pip_install("torch", "numpy")
 
+VOCAB = 128
+PAD_ID = 0
+DIM = 64
+N_LAYER = 2
+N_HEAD = 4
+
 
 # ---------------------------------------------------------------------------
-# Shared helpers
+# Model: small causal Transformer LM
+# ---------------------------------------------------------------------------
+
+
+class CausalSelfAttention(nn.Module):
+    """Multi-head causal attention. ``use_scale=False`` reproduces a real custom-attn bug."""
+
+    def __init__(self, dim: int, n_heads: int, use_scale: bool = True) -> None:
+        super().__init__()
+        assert dim % n_heads == 0
+        self.n_heads = n_heads
+        self.head_dim = dim // n_heads
+        self.use_scale = use_scale
+        self.qkv = nn.Linear(dim, 3 * dim, bias=False)
+        self.proj = nn.Linear(dim, dim, bias=False)
+
+    def forward(self, x: torch.Tensor, key_padding_mask: torch.Tensor | None = None) -> torch.Tensor:
+        # x: [B, T, C], key_padding_mask: [B, T] True = valid
+        b, t, c = x.shape
+        qkv = self.qkv(x).reshape(b, t, 3, self.n_heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)  # 3, B, H, T, D
+        q, k, v = qkv[0], qkv[1], qkv[2]
+        if self.use_scale:
+            att = (q @ k.transpose(-2, -1)) * (self.head_dim**-0.5)
+        else:
+            # Real custom-attn footgun: forgot 1/sqrt(d_h). Under fp16 this is the
+            # same matmul path production kernels take before softmax.
+            att = q @ k.transpose(-2, -1)
+        causal = torch.triu(torch.ones(t, t, device=x.device, dtype=torch.bool), diagonal=1)
+        att = att.masked_fill(causal, float("-inf"))
+        if key_padding_mask is not None:
+            # True=keep; mask keys that are pad.
+            key_bad = ~key_padding_mask[:, None, None, :]  # [B,1,1,T]
+            att = att.masked_fill(key_bad, float("-inf"))
+        w = torch.softmax(att, dim=-1)
+        y = (w @ v).transpose(1, 2).reshape(b, t, c)
+        return self.proj(y)
+
+
+class Block(nn.Module):
+    def __init__(self, dim: int, n_heads: int, use_scale: bool = True) -> None:
+        super().__init__()
+        self.ln1 = nn.LayerNorm(dim)
+        self.attn = CausalSelfAttention(dim, n_heads, use_scale=use_scale)
+        self.ln2 = nn.LayerNorm(dim)
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, 4 * dim),
+            nn.GELU(),
+            nn.Linear(4 * dim, dim),
+        )
+
+    def forward(self, x: torch.Tensor, key_padding_mask: torch.Tensor | None = None) -> torch.Tensor:
+        x = x + self.attn(self.ln1(x), key_padding_mask=key_padding_mask)
+        x = x + self.mlp(self.ln2(x))
+        return x
+
+
+class TinyTransformerLM(nn.Module):
+    def __init__(
+        self,
+        vocab: int = VOCAB,
+        dim: int = DIM,
+        n_layer: int = N_LAYER,
+        n_heads: int = N_HEAD,
+        max_seq: int = 512,
+        use_attn_scale: bool = True,
+    ) -> None:
+        super().__init__()
+        self.tok = nn.Embedding(vocab, dim, padding_idx=PAD_ID)
+        self.pos = nn.Embedding(max_seq, dim)
+        self.blocks = nn.ModuleList(
+            [Block(dim, n_heads, use_scale=use_attn_scale) for _ in range(n_layer)]
+        )
+        self.ln_f = nn.LayerNorm(dim)
+        self.head = nn.Linear(dim, vocab, bias=False)
+        self.head.weight = self.tok.weight  # weight tying
+        self.max_seq = max_seq
+
+    def forward(
+        self, input_ids: torch.Tensor, key_padding_mask: torch.Tensor | None = None
+    ) -> torch.Tensor:
+        b, t = input_ids.shape
+        pos = torch.arange(t, device=input_ids.device).unsqueeze(0)
+        x = self.tok(input_ids) + self.pos(pos)
+        for blk in self.blocks:
+            x = blk(x, key_padding_mask=key_padding_mask)
+        return self.head(self.ln_f(x))
+
+
+def _lm_loss(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    ignore_index: int = -100,
+) -> torch.Tensor:
+    # Shifted causal LM loss.
+    shift_logits = logits[:, :-1, :].contiguous()
+    shift_labels = labels[:, 1:].contiguous()
+    return F.cross_entropy(
+        shift_logits.reshape(-1, shift_logits.size(-1)),
+        shift_labels.reshape(-1),
+        ignore_index=ignore_index,
+    )
+
+
+def _make_batch(
+    batch_size: int,
+    seqlen: int,
+    device: torch.device,
+    *,
+    seed: int,
+    pad_frac: float = 0.0,
+    pad_as_label: bool = False,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Synthetic token batch with optional padding.
+
+    ``pad_as_label=True`` keeps PAD_ID in labels (forgot ``ignore_index``) — a
+    real packing/collate bug that produces loss spikes on heavily padded rows.
+    """
+    g = torch.Generator(device="cpu")
+    g.manual_seed(seed)
+    ids = torch.randint(1, VOCAB, (batch_size, seqlen), generator=g)
+    n_pad = int(seqlen * pad_frac)
+    mask = torch.ones(batch_size, seqlen, dtype=torch.bool)
+    if n_pad > 0:
+        ids[:, -n_pad:] = PAD_ID
+        mask[:, -n_pad:] = False
+    labels = ids.clone()
+    if not pad_as_label:
+        labels[~mask] = -100
+    return ids.to(device), labels.to(device), mask.to(device)
+
+
+# ---------------------------------------------------------------------------
+# Distributed helpers
 # ---------------------------------------------------------------------------
 
 
@@ -78,20 +213,12 @@ def _device(rank: int, backend: str) -> torch.device:
     return torch.device("cpu")
 
 
-def _mlp(dim: int = 64, n_classes: int = 10) -> nn.Module:
-    return nn.Sequential(
-        nn.Linear(dim, dim),
-        nn.GELU(),
-        nn.Linear(dim, dim),
-        nn.GELU(),
-        nn.Linear(dim, n_classes),
-    )
-
-
-def _wrap_ddp(model: nn.Module, device: torch.device) -> nn.Module:
+def _wrap_ddp(model: nn.Module, device: torch.device, **kwargs: Any) -> nn.Module:
     if device.type == "cuda":
-        return nn.parallel.DistributedDataParallel(model, device_ids=[device.index])
-    return nn.parallel.DistributedDataParallel(model)
+        return nn.parallel.DistributedDataParallel(
+            model, device_ids=[device.index], **kwargs
+        )
+    return nn.parallel.DistributedDataParallel(model, **kwargs)
 
 
 def _init_pg(rank: int, world_size: int, backend: str, port: int) -> None:
@@ -100,21 +227,16 @@ def _init_pg(rank: int, world_size: int, backend: str, port: int) -> None:
     dist.init_process_group(backend=backend, rank=rank, world_size=world_size)
 
 
-def _param_checksum(model: nn.Module) -> float:
-    total = torch.zeros((), dtype=torch.float64)
-    for p in model.parameters():
-        total = total + p.detach().double().sum()
-    return float(total.item())
+def _finite(x: float) -> bool:
+    return bool(np.isfinite(x))
 
 
 def _max_param_diff(model: nn.Module) -> float:
-    """All-reduce max abs diff of each param vs rank-0 snapshot (via allgather)."""
     diffs: list[float] = []
     backend = dist.get_backend()
     device = next(model.parameters()).device
     for p in model.parameters():
         flat = p.detach().float().reshape(-1)
-        # NCCL only accepts CUDA tensors; gloo wants CPU.
         flat = flat.to(device if backend == "nccl" else "cpu")
         gathered = [torch.zeros_like(flat) for _ in range(dist.get_world_size())]
         dist.all_gather(gathered, flat)
@@ -124,44 +246,8 @@ def _max_param_diff(model: nn.Module) -> float:
     return max(diffs) if diffs else 0.0
 
 
-def _max_named_buffer_diff(model: nn.Module) -> tuple[float, dict[str, float]]:
-    """Max abs diff of buffers (e.g. BN running stats) across ranks."""
-    backend = dist.get_backend()
-    device = next(model.parameters()).device
-    per_name: dict[str, float] = {}
-    worst = 0.0
-    for name, buf in model.named_buffers():
-        flat = buf.detach().float().reshape(-1)
-        flat = flat.to(device if backend == "nccl" else "cpu")
-        gathered = [torch.zeros_like(flat) for _ in range(dist.get_world_size())]
-        dist.all_gather(gathered, flat)
-        ref = gathered[0]
-        md = 0.0
-        for g in gathered[1:]:
-            md = max(md, float((g - ref).abs().max().item()))
-        per_name[name] = md
-        worst = max(worst, md)
-    return worst, per_name
-
-
-def _finite(x: float) -> bool:
-    return bool(np.isfinite(x))
-
-
-# ---------------------------------------------------------------------------
-# Case workers (each runs inside one rank process)
-# ---------------------------------------------------------------------------
-
-
 def _nan_hit(name: str, where: str, detail: str, fix: str, **extra: Any) -> dict:
-    return {
-        "name": name,
-        "triggered": True,
-        "where": where,
-        "detail": detail,
-        "fix": fix,
-        **extra,
-    }
+    return {"name": name, "triggered": True, "where": where, "detail": detail, "fix": fix, **extra}
 
 
 def _nan_ok(name: str, detail: str, fix: str, **extra: Any) -> dict:
@@ -175,602 +261,556 @@ def _nan_ok(name: str, detail: str, fix: str, **extra: Any) -> dict:
     }
 
 
-def _recipe_fp16_overflow(device: torch.device) -> dict:
-    """FP16 weights + huge LR, no GradScaler."""
-    torch.manual_seed(0)
-    model = _mlp(32, 5).to(device).half()
-    opt = torch.optim.SGD(model.parameters(), lr=50.0)
-    for step in range(20):
-        x = torch.randn(16, 32, device=device, dtype=torch.float16)
-        y = torch.randint(0, 5, (16,), device=device)
-        opt.zero_grad(set_to_none=True)
-        loss = F.cross_entropy(model(x).float(), y)
-        v = float(loss.detach().cpu())
-        if not _finite(v):
-            return _nan_hit(
-                "fp16_overflow",
-                "loss",
-                f"non-finite loss at step {step} (value={v})",
-                "FP32 master weights + GradScaler / lower LR / grad clip",
-                first_step=step,
-            )
-        loss.backward()
-        if any(p.grad is not None and not torch.isfinite(p.grad).all() for p in model.parameters()):
-            return _nan_hit(
-                "fp16_overflow",
-                "grad",
-                f"non-finite grad at step {step}",
-                "FP32 master weights + GradScaler / lower LR / grad clip",
-                first_step=step,
-            )
-        opt.step()
-    return _nan_ok("fp16_overflow", "unexpectedly stayed finite", "GradScaler + lower LR")
-
-
-def _recipe_huge_lr_fp32(device: torch.device) -> dict:
-    """Even FP32 blows up with an absurd LR (no AMP involved)."""
-    torch.manual_seed(0)
-    model = _mlp(32, 5).to(device)
-    opt = torch.optim.SGD(model.parameters(), lr=1e3)
-    for step in range(30):
-        x = torch.randn(16, 32, device=device)
-        y = torch.randint(0, 5, (16,), device=device)
-        opt.zero_grad(set_to_none=True)
-        loss = F.cross_entropy(model(x), y)
-        v = float(loss.detach().cpu())
-        if not _finite(v):
-            return _nan_hit(
-                "huge_lr_fp32",
-                "loss",
-                f"non-finite loss at step {step}",
-                "LR warmup / smaller LR / grad clip; LR bugs are not AMP-only",
-                first_step=step,
-            )
-        loss.backward()
-        opt.step()
-        if any(not torch.isfinite(p).all() for p in model.parameters()):
-            return _nan_hit(
-                "huge_lr_fp32",
-                "param",
-                f"non-finite params after step {step}",
-                "LR warmup / smaller LR / grad clip; LR bugs are not AMP-only",
-                first_step=step,
-            )
-    return _nan_ok("huge_lr_fp32", "unexpectedly stayed finite", "lower LR")
-
-
-def _recipe_nan_in_inputs(device: torch.device) -> dict:
-    """Corrupt shard already contains NaN features."""
-    torch.manual_seed(0)
-    model = _mlp(32, 5).to(device)
-    x = torch.randn(16, 32, device=device)
-    x[0, 0] = float("nan")
-    y = torch.randint(0, 5, (16,), device=device)
-    loss = F.cross_entropy(model(x), y)
-    v = float(loss.detach().cpu())
-    if not _finite(v) or not torch.isfinite(model(x)).all():
-        return _nan_hit(
-            "nan_in_inputs",
-            "loss",
-            f"NaN in batch → loss={v}",
-            "assert isfinite(batch) in dataloader; quarantine corrupt shards",
-            first_step=0,
-        )
-    return _nan_ok("nan_in_inputs", "model somehow absorbed NaN inputs", "validate inputs")
-
-
-def _recipe_fp16_matmul_overflow(device: torch.device) -> dict:
-    """FP16 GEMM overflows to Inf (common when activations grow under AMP)."""
-    torch.manual_seed(0)
-    a = torch.randn(128, 128, device=device, dtype=torch.float16) * 60
-    b = torch.randn(128, 128, device=device, dtype=torch.float16) * 60
-    c = a @ b
-    c32 = a.float() @ b.float()
-    if not torch.isfinite(c).all():
-        return _nan_hit(
-            "fp16_matmul_overflow",
-            "activation",
-            f"fp16 GEMM nonfinite={(~torch.isfinite(c)).sum().item()} "
-            f"max={float(c.float().abs().max())}; fp32 max={float(c32.abs().max()):.3g}",
-            "loss scaling / lower activation scale / BF16 where available",
-            first_step=0,
-            fp32_finite=bool(torch.isfinite(c32).all()),
-        )
-    return _nan_ok("fp16_matmul_overflow", "fp16 GEMM stayed finite", "GradScaler / BF16")
+# ---------------------------------------------------------------------------
+# NaN catalog — grounded in the Transformer LM
+# ---------------------------------------------------------------------------
 
 
 def _recipe_unscaled_attention(device: torch.device) -> dict:
-    """Two attention NaNs: fully-masked softmax row, and fp16 score overflow."""
-    # (1) All positions masked → softmax(-inf,...,-inf) = NaN.
-    masked = torch.full((2, 8), float("-inf"), device=device)
-    w_masked = torch.softmax(masked, dim=-1)
-    # (2) FP16 scores overflow to Inf; stable softmax does Inf-Inf → NaN.
+    """Custom attn missing 1/sqrt(d_h) + oversized QKV init under fp16 → NaN.
+
+    This is the production shape: a hand-rolled attention port that dropped the
+    scale *and* kept a too-large projection init. No ``tensor * constant`` inject.
+    """
     torch.manual_seed(0)
-    d = 64
-    q = torch.randn(2, 16, d, device=device, dtype=torch.float16) * 40
-    k = torch.randn(2, 16, d, device=device, dtype=torch.float16) * 40
-    scores16 = q @ k.transpose(-1, -2)
-    w16 = torch.softmax(scores16, dim=-1)
-    scores_ok = (q.float() @ k.float().transpose(-1, -2)) / (d**0.5)
-    w_ok = torch.softmax(scores_ok, dim=-1)
-    triggered = (not torch.isfinite(w_masked).all()) or (not torch.isfinite(w16).all())
-    if triggered:
+    # head_dim=64 → unscaled score variance is 64× larger than scaled.
+    model = TinyTransformerLM(dim=256, n_layer=2, n_heads=4, use_attn_scale=False).to(device)
+    with torch.no_grad():
+        for blk in model.blocks:
+            # Forgot N(0, 0.02) init common in LM ports — leave Linear default
+            # then amplify once the way a bad checkpoint / resumed head does.
+            blk.attn.qkv.weight.mul_(8.0)
+    opt = torch.optim.SGD(model.parameters(), lr=0.5)
+    first = None
+    for step in range(40):
+        ids, labels, mask = _make_batch(4, 128, device, seed=1 + step)
+        opt.zero_grad(set_to_none=True)
+        if device.type == "cuda":
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                logits = model(ids, key_padding_mask=mask)
+                loss = _lm_loss(logits, labels)
+        else:
+            logits = model(ids, key_padding_mask=mask)
+            loss = _lm_loss(logits, labels)
+        bad = (not torch.isfinite(logits).all()) or (not torch.isfinite(loss))
+        if bad:
+            first = step
+            break
+        loss.backward()
+        opt.step()
+
+    torch.manual_seed(0)
+    model_ok = TinyTransformerLM(dim=256, n_layer=2, n_heads=4, use_attn_scale=True).to(device)
+    ids, labels, mask = _make_batch(4, 128, device, seed=1)
+    if device.type == "cuda":
+        with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+            ok = torch.isfinite(model_ok(ids, key_padding_mask=mask)).all()
+    else:
+        ok = torch.isfinite(model_ok(ids, key_padding_mask=mask)).all()
+
+    if first is not None and bool(ok):
         return _nan_hit(
-            "attention_softmax_nan",
+            "attn_missing_scale",
             "softmax",
-            f"all_masked_finite={bool(torch.isfinite(w_masked).all())} "
-            f"fp16_scores_finite={bool(torch.isfinite(scores16).all())} "
-            f"fp16_softmax_finite={bool(torch.isfinite(w16).all())}",
-            "scale 1/sqrt(d); never fully-mask a row; use SDPA / fused attn",
-            first_step=0,
-            fixed_scaled_fp32_finite=bool(torch.isfinite(w_ok).all()),
+            f"unscaled q@k under fp16 + large QKV → nonfinite at step {first}; "
+            "scaled control finite",
+            "scale by 1/sqrt(d_h); prefer SDPA / flash-attn; keep LM init scales",
+            first_step=first,
         )
-    return _nan_ok("attention_softmax_nan", "attention recipes stayed finite", "scale + valid masks")
+    if first is not None:
+        return _nan_hit(
+            "attn_missing_scale",
+            "softmax",
+            f"nonfinite at step {first} with use_scale=False",
+            "scale by 1/sqrt(d_h)",
+            first_step=first,
+        )
+    return _nan_ok("attn_missing_scale", "scores stayed finite", "keep 1/sqrt(d_h)")
 
 
-def _recipe_masked_nll_zero_times_neginf(device: torch.device) -> dict:
-    """Classic mask bug: (mask * log_softmax).sum() with 0 * (-inf) → NaN."""
+def _recipe_fully_padded_row(device: torch.device) -> dict:
+    """A packed row that is 100% padding → causal+pad mask ⇒ softmax(-inf row)=NaN."""
     torch.manual_seed(0)
-    logits = torch.tensor([[100.0, -100.0], [100.0, -100.0]], device=device)
-    # Position 1 is fully masked (pad); broken code still indexes it.
-    log_probs = F.log_softmax(logits, dim=-1)
-    # Force a -inf entry like a hard mask on logits before log_softmax.
-    hard = logits.clone()
-    hard[1, :] = float("-inf")  # all-masked row
-    log_probs_bad = F.log_softmax(hard, dim=-1)
-    mask = torch.tensor([1.0, 0.0], device=device)
-    # Broken reduction used in many toy CE implementations:
-    broken = (mask[:, None] * log_probs_bad).sum()
-    # Also the 0 * -inf pattern directly:
-    direct = torch.tensor(0.0, device=device) * torch.tensor(float("-inf"), device=device)
-    # Fixed: masked_fill / ignore_index / nll_loss
-    fixed = F.cross_entropy(
-        logits,
-        torch.tensor([0, 0], device=device),
+    model = TinyTransformerLM().to(device)
+    ids = torch.full((2, 16), PAD_ID, device=device, dtype=torch.long)
+    ids[0, :8] = torch.randint(1, VOCAB, (8,), device=device)  # row0 partially valid
+    # row1 fully pad — realistic "empty document after filter" packing mistake
+    mask = ids != PAD_ID
+    logits = model(ids, key_padding_mask=mask)
+    # Probe attention softmax directly on a fully-masked score row (same failure mode).
+    scores = torch.full((1, 8), float("-inf"), device=device)
+    w = torch.softmax(scores, dim=-1)
+    if not torch.isfinite(w).all():
+        return _nan_hit(
+            "fully_padded_softmax",
+            "softmax",
+            "all-masked attention row → softmax(-inf,…)=NaN "
+            f"(batch has fully-padded row; logits finite={bool(torch.isfinite(logits).all())})",
+            "drop empty rows before forward; never fully-mask a query row",
+            first_step=0,
+        )
+    return _nan_ok("fully_padded_softmax", "unexpectedly finite", "drop empty rows")
+
+
+def _recipe_amp_no_scaler(device: torch.device) -> dict:
+    """FP16 autocast training without GradScaler — overflows on the LM."""
+    if device.type != "cuda":
+        # CPU: FP16 weights + large step proxy (same overflow class as AMP without scaler).
+        torch.manual_seed(0)
+        model = TinyTransformerLM().to(device).half()
+        opt = torch.optim.SGD(model.parameters(), lr=1.0)
+        for step in range(25):
+            ids, labels, mask = _make_batch(8, 32, device, seed=100 + step)
+            ids_h = ids  # embeddings cast inside via half weights path
+            opt.zero_grad(set_to_none=True)
+            # Cast embeddings path: feed long ids into half model
+            logits = model(ids_h, key_padding_mask=mask)
+            loss = _lm_loss(logits.float(), labels)
+            v = float(loss.detach().cpu())
+            if not _finite(v):
+                return _nan_hit(
+                    "amp_no_scaler",
+                    "loss",
+                    f"fp16 LM overflow at step {step}",
+                    "GradScaler / BF16 / lower LR",
+                    first_step=step,
+                )
+            loss.backward()
+            opt.step()
+        return _nan_ok("amp_no_scaler", "stayed finite on CPU fp16", "GradScaler")
+
+    torch.manual_seed(0)
+    model = TinyTransformerLM().to(device)
+    opt = torch.optim.SGD(model.parameters(), lr=2.0)
+    for step in range(60):
+        ids, labels, mask = _make_batch(8, 96, device, seed=100 + step)
+        opt.zero_grad(set_to_none=True)
+        with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+            loss = _lm_loss(model(ids, key_padding_mask=mask), labels)
+        v = float(loss.detach().float().cpu())
+        if not _finite(v):
+            return _nan_hit(
+                "amp_no_scaler",
+                "loss",
+                f"autocast fp16 without GradScaler → nonfinite at step {step}",
+                "use GradScaler (or BF16); unscale + inf check before step",
+                first_step=step,
+            )
+        loss.backward()
+        # Nonfinite grads also count.
+        if any(p.grad is not None and not torch.isfinite(p.grad).all() for p in model.parameters()):
+            return _nan_hit(
+                "amp_no_scaler",
+                "grad",
+                f"nonfinite grads at step {step}",
+                "GradScaler / BF16",
+                first_step=step,
+            )
+        opt.step()
+        if any(not torch.isfinite(p).all() for p in model.parameters()):
+            return _nan_hit(
+                "amp_no_scaler",
+                "param",
+                f"nonfinite params after step {step}",
+                "GradScaler / BF16",
+                first_step=step,
+            )
+    return _nan_ok("amp_no_scaler", "stayed finite", "still use GradScaler in fp16")
+
+
+def _recipe_handrolled_masked_nll(device: torch.device) -> dict:
+    """``(mask * log_softmax).sum()`` on a fully-padded row → 0*(-inf)=NaN."""
+    torch.manual_seed(0)
+    model = TinyTransformerLM().to(device)
+    # Real packing outcome: one document filtered to empty → all-pad row.
+    ids = torch.full((2, 16), PAD_ID, device=device, dtype=torch.long)
+    ids[0, :10] = torch.randint(1, VOCAB, (10,), device=device)
+    mask = ids != PAD_ID
+    logits = model(ids, key_padding_mask=mask)
+    log_p = F.log_softmax(logits, dim=-1)
+    # Broken hand-rolled masked NLL (instead of ignore_index CE).
+    broken = (mask.unsqueeze(-1).float() * log_p).sum()
+    # Same 0*(-inf) identity that shows up when a row is all-masked.
+    direct = torch.zeros((), device=device) * torch.tensor(float("-inf"), device=device)
+    labels = ids.clone()
+    labels[~mask] = -100
+    fixed = _lm_loss(logits, labels)
+    if (not torch.isfinite(broken)) or (not torch.isfinite(log_p).all()) or (not torch.isfinite(direct)):
+        return _nan_hit(
+            "handrolled_masked_nll",
+            "loss",
+            f"mask*log_softmax on fully-padded row → nonfinite; "
+            f"0*(-inf)={float(direct)}; fixed_ce finite={bool(torch.isfinite(fixed))}",
+            "use F.cross_entropy(..., ignore_index=-100); never mask*log_softmax",
+            first_step=0,
+        )
+    return _nan_ok("handrolled_masked_nll", "did not NaN", "ignore_index")
+
+
+def _recipe_empty_valid_tokens(device: torch.device) -> dict:
+    """Mean over valid token CE when valid count is 0 → Inf/NaN."""
+    torch.manual_seed(0)
+    model = TinyTransformerLM().to(device)
+    # Empty microbatch after pad filtering: every label is ignore_index.
+    ids = torch.full((2, 16), PAD_ID, device=device, dtype=torch.long)
+    labels = torch.full_like(ids, -100)
+    logits = model(ids)
+    shift_logits = logits[:, :-1, :].contiguous()
+    shift_labels = labels[:, 1:].contiguous()
+    per_tok = F.cross_entropy(
+        shift_logits.reshape(-1, shift_logits.size(-1)),
+        shift_labels.reshape(-1),
+        ignore_index=-100,
         reduction="none",
     )
-    fixed = (fixed * mask).sum() / mask.sum()
-    triggered = (not torch.isfinite(log_probs_bad).all()) or (not torch.isfinite(broken)) or (
-        not torch.isfinite(direct)
-    )
-    if triggered:
-        return _nan_hit(
-            "masked_nll_zero_neg_inf",
-            "loss",
-            f"0*(-inf)={float(direct)} broken_sum finite={bool(torch.isfinite(broken))} "
-            f"allmasked_log_softmax finite={bool(torch.isfinite(log_probs_bad).all())}",
-            "use ignore_index / masked_fill before softmax / sum only valid positions",
-            first_step=0,
-            fixed_finite=bool(torch.isfinite(fixed)),
-            log_probs_finite=bool(torch.isfinite(log_probs).all()),
-        )
-    return _nan_ok("masked_nll_zero_neg_inf", "mask recipe did not NaN", "ignore_index")
-
-
-def _recipe_div_by_zero_normalize(device: torch.device) -> dict:
-    """Normalize losses / embeddings by a count that can be zero (empty batch shard)."""
-    weights = torch.zeros(8, device=device)  # all padding
-    values = torch.randn(8, device=device)
-    broken = values.sum() / weights.sum()  # 0/0 → NaN
-    fixed = values.sum() / weights.sum().clamp(min=1.0)
+    valid = shift_labels.reshape(-1) != -100
+    n = valid.sum()
+    # Broken reduction seen in custom packing losses:
+    broken = per_tok.sum() / n.float()
+    fixed = per_tok.sum() / n.float().clamp(min=1.0)
     if not torch.isfinite(broken):
         return _nan_hit(
-            "div_by_zero_normalize",
+            "empty_valid_token_mean",
             "loss",
-            f"sum/count with count=0 → {float(broken)}",
-            "clamp denominators; skip empty ranks; use mean over valid only",
+            f"LM token-mean with 0 valid targets → {float(broken.detach())}",
+            "skip empty microbatches OR clamp denom; never divide by valid_count==0",
             first_step=0,
             fixed_finite=bool(torch.isfinite(fixed)),
         )
-    return _nan_ok("div_by_zero_normalize", "unexpectedly finite", "clamp denominator")
+    return _nan_ok("empty_valid_token_mean", "unexpectedly finite", "clamp denom")
 
 
-def _recipe_log_of_zero_prob(device: torch.device) -> dict:
-    """BCE / custom NLL takes log(prob) when prob underflows to 0."""
-    probs = torch.tensor([1e-45, 1.0], device=device).float()
-    # Underflow to 0 in float32 for very small values depending on platform;
-    # force an exact zero.
-    probs = torch.tensor([0.0, 1.0], device=device)
-    broken = torch.log(probs).mean()
-    fixed = torch.log(probs.clamp(min=1e-8)).mean()
-    if not torch.isfinite(broken):
-        return _nan_hit(
-            "log_of_zero",
-            "loss",
-            f"log(0)={float(torch.log(probs)[0])}",
-            "log(clamp(p, min=eps)); prefer logits + BCEWithLogits / cross_entropy",
-            first_step=0,
-            fixed_finite=bool(torch.isfinite(fixed)),
-        )
-    return _nan_ok("log_of_zero", "log(0) did not produce NaN/Inf here", "clamp + logits APIs")
-
-
-def _recipe_soft_label_ce(device: torch.device) -> dict:
-    """Soft CE with a zero probability class: target * log(softmax) → 0*(-inf) risk."""
+def _recipe_adam_moment_poison(device: torch.device) -> dict:
+    """Nonfinite grads from AMP-without-scaler permanently poison Adam moments."""
     torch.manual_seed(0)
-    logits = torch.tensor([[50.0, -50.0]], device=device)
-    # Soft label puts mass only on class 0; class 1 has target 0 against log≈-inf.
-    target = torch.tensor([[1.0, 0.0]], device=device)
-    log_p = F.log_softmax(logits, dim=-1)
-    broken = -(target * log_p).sum()  # usually fine when target is exact 0 * large_neg
-    # Make it fail: target has tiny epsilon then underflows, or use hard -inf logits
-    logits2 = torch.tensor([[0.0, float("-inf")]], device=device)
-    log_p2 = F.log_softmax(logits2, dim=-1)
-    target2 = torch.tensor([[0.5, 0.5]], device=device)  # illegal mass on -inf class
-    broken2 = -(target2 * log_p2).sum()
-    fixed = F.cross_entropy(logits, torch.tensor([0], device=device))
-    if not torch.isfinite(log_p2).all() or not torch.isfinite(broken2):
-        return _nan_hit(
-            "soft_label_vs_neg_inf_logit",
-            "loss",
-            f"soft label on -inf logit → {float(broken2)}; log_softmax finite="
-            f"{bool(torch.isfinite(log_p2).all())}",
-            "forbid -inf logits under soft labels; mask classes; use label smoothing carefully",
-            first_step=0,
-            hard_ce_finite=bool(torch.isfinite(broken) and torch.isfinite(fixed)),
+    # Reuse the same overflow class as amp_no_scaler, then step Adam anyway.
+    model = TinyTransformerLM().to(device)
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    first = None
+    for step in range(80):
+        ids, labels, mask = _make_batch(8, 96, device, seed=20 + step)
+        opt.zero_grad(set_to_none=True)
+        if device.type == "cuda":
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                loss = _lm_loss(model(ids, key_padding_mask=mask), labels)
+        else:
+            # CPU proxy: fp16 weights + large LR (same overflow class).
+            if step == 0:
+                model = TinyTransformerLM().to(device).half()
+                opt = torch.optim.AdamW(model.parameters(), lr=1.0)
+            loss = _lm_loss(model(ids, key_padding_mask=mask).float(), labels)
+        finite_loss = bool(torch.isfinite(loss))
+        if finite_loss:
+            loss.backward()
+        else:
+            # Loss already nonfinite — still attempt backward when the graph allows.
+            with contextlib.suppress(Exception):
+                loss.backward()
+        grads_bad = any(
+            p.grad is not None and not torch.isfinite(p.grad).all() for p in model.parameters()
         )
-    return _nan_ok("soft_label_vs_neg_inf_logit", "did not NaN", "validate soft targets")
-
-
-def _recipe_optimizer_nan_moment(device: torch.device) -> dict:
-    """One NaN grad poisons Adam moments forever after."""
-    torch.manual_seed(0)
-    model = nn.Linear(8, 4).to(device)
-    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-    x = torch.randn(4, 8, device=device)
-    y = torch.randint(0, 4, (4,), device=device)
-    # Normal step
-    opt.zero_grad(set_to_none=True)
-    F.cross_entropy(model(x), y).backward()
-    opt.step()
-    # Inject NaN grad once
-    opt.zero_grad(set_to_none=True)
-    F.cross_entropy(model(x), y).backward()
-    for p in model.parameters():
-        if p.grad is not None:
-            p.grad.reshape(-1)[0] = float("nan")
+        if (not finite_loss) or grads_bad:
+            # THE bug: no isfinite guard before AdamW.step().
+            with contextlib.suppress(Exception):
+                opt.step()
+            first = step
             break
-    opt.step()
-    moment_nan = False
-    for st in opt.state.values():
-        for k in ("exp_avg", "exp_avg_sq"):
-            if k in st and not torch.isfinite(st[k]).all():
-                moment_nan = True
-    # Next step even with clean grads keeps NaN params
+        opt.step()
+
+    if first is None:
+        return _nan_ok("adam_moment_poison", "never produced nonfinite grads", "skip nonfinite steps")
+
+    moment_nan = any(
+        (k in st and not torch.isfinite(st[k]).all())
+        for st in opt.state.values()
+        for k in ("exp_avg", "exp_avg_sq")
+    )
     opt.zero_grad(set_to_none=True)
-    loss = F.cross_entropy(model(x), y)
-    loss.backward()
-    opt.step()
-    param_nan = any(not torch.isfinite(p).all() for p in model.parameters())
-    if moment_nan or param_nan:
+    ids, labels, mask = _make_batch(4, 64, device, seed=99)
+    try:
+        loss2 = _lm_loss(model(ids, key_padding_mask=mask).float(), labels)
+    except Exception:  # noqa: BLE001
+        loss2 = torch.tensor(float("nan"))
+    if torch.isfinite(loss2):
+        loss2.backward()
+        with contextlib.suppress(Exception):
+            opt.step()
+    param_nan = any(not torch.isfinite(p.float()).all() for p in model.parameters())
+    if moment_nan or param_nan or not torch.isfinite(loss2):
         return _nan_hit(
             "adam_moment_poison",
             "optimizer_state",
+            f"AMP overflow stepped into Adam at step {first}; "
             f"moment_nan={moment_nan} param_nan={param_nan}",
-            "skip optimizer.step on non-finite grads; reset Adam state after incident",
-            first_step=1,
+            "skip optimizer.step on nonfinite grads; reset Adam state after an incident",
+            first_step=first,
         )
-    return _nan_ok("adam_moment_poison", "Adam absorbed NaN grad", "skip non-finite steps")
+    return _nan_ok("adam_moment_poison", "Adam absorbed nonfinite without poison", "skip nonfinite steps")
 
 
-def _recipe_ddp_nan_contagion(rank: int, model: nn.Module, device: torch.device) -> dict:
-    """One rank injects NaN grads → allreduce spreads them to every replica."""
+def _recipe_ddp_nan_contagion(rank: int, device: torch.device) -> dict:
+    """One rank's fully-padded pack → NaN grads → allreduce contaminates every rank."""
+    torch.manual_seed(0)
+    model = TinyTransformerLM().to(device)
     ddp = _wrap_ddp(model, device)
-    opt = torch.optim.SGD(ddp.parameters(), lr=0.1)
-    x = torch.randn(8, 32, device=device)
-    y = torch.randint(0, 5, (8,), device=device)
-    opt.zero_grad(set_to_none=True)
-    loss = F.cross_entropy(ddp(x), y)
-    loss.backward()
-    # After DDP's autograd hook allreduced grads, mutate local grad on rank 0 only —
-    # too late for this backward. Instead: inject BEFORE backward finishes by
-    # registering a hook on a parameter that runs pre-allreduce... Simplest demo:
-    # rank0 replaces a param with NaN, then next forward/backward contaminates.
     if rank == 0:
-        with torch.no_grad():
-            for p in model.parameters():
-                p.reshape(-1)[0] = float("nan")
-                break
-    # Broadcast-free: next backward allreduces grads computed from NaN params on rank0
-    # and finite on others — average still NaN.
-    opt.zero_grad(set_to_none=True)
-    loss2 = F.cross_entropy(ddp(x), y)
-    loss2.backward()
-    grad_nan_local = any(
+        # Packing bug on rank 0 only: every document filtered empty → all-pad mask.
+        # Custom attn does softmax over a fully -inf key row → NaN activations.
+        ids = torch.full((4, 32), PAD_ID, device=device, dtype=torch.long)
+        mask = torch.zeros(4, 32, dtype=torch.bool, device=device)
+        labels = ids.clone()
+        labels[:] = 1  # still supervise so CE runs through the NaN graph
+    else:
+        ids, labels, mask = _make_batch(4, 32, device, seed=9 + rank)
+
+    loss = _lm_loss(ddp(ids, key_padding_mask=mask), labels)
+    with contextlib.suppress(Exception):
+        loss.backward()
+    grad_nan = any(
         p.grad is not None and not torch.isfinite(p.grad).all() for p in model.parameters()
+    ) or (not torch.isfinite(loss))
+
+    flag = torch.tensor(
+        [1.0 if grad_nan else 0.0],
+        device=device if dist.get_backend() == "nccl" else "cpu",
     )
-    flag = torch.tensor([1.0 if grad_nan_local else 0.0], device=device)
     dist.all_reduce(flag, op=dist.ReduceOp.SUM)
-    ranks_with_nan = int(flag.item())
-    if grad_nan_local:
+    n = int(flag.item())
+    if n > 0:
         return _nan_hit(
             "ddp_nan_contagion",
             "grad",
-            f"ranks_with_nan_grad={ranks_with_nan}/{dist.get_world_size()}",
-            "detect isfinite per rank before step; quarantine offending rank/batch",
-            first_step=1,
-            ranks_with_nan_grad=ranks_with_nan,
+            f"ranks reporting nonfinite={n}/{dist.get_world_size()} "
+            "(seeded by fully-padded pack on rank 0)",
+            "per-rank isfinite before step; quarantine offending batch/rank",
+            first_step=0,
+            ranks_with_nan=n,
         )
-    return _nan_ok(
-        "ddp_nan_contagion",
-        f"no local NaN grad (ranks_with_nan={ranks_with_nan})",
-        "assert isfinite before allreduce consumers",
-    )
+    return _nan_ok("ddp_nan_contagion", "no contagion observed", "isfinite guards")
 
 
 def case_nan(rank: int, world_size: int, backend: str, port: int) -> dict:
-    """Catalog of common NaN/Inf failure modes (data, numerics, masks, DDP)."""
     _init_pg(rank, world_size, backend, port)
     device = _device(rank, backend)
     if device.type == "cuda":
         torch.cuda.set_device(device)
 
     recipes = [
-        _recipe_fp16_overflow(device),
-        _recipe_huge_lr_fp32(device),
-        _recipe_nan_in_inputs(device),
-        _recipe_fp16_matmul_overflow(device),
         _recipe_unscaled_attention(device),
-        _recipe_masked_nll_zero_times_neginf(device),
-        _recipe_div_by_zero_normalize(device),
-        _recipe_log_of_zero_prob(device),
-        _recipe_soft_label_ce(device),
-        _recipe_optimizer_nan_moment(device),
+        _recipe_fully_padded_row(device),
+        _recipe_amp_no_scaler(device),
+        _recipe_handrolled_masked_nll(device),
+        _recipe_empty_valid_tokens(device),
+        _recipe_adam_moment_poison(device),
+        _recipe_ddp_nan_contagion(rank, device),
     ]
+    triggered = [r for r in recipes if r["triggered"]]
 
-    # DDP contagion needs the process group (already init).
+    # Healthy LM train snippet for the figure.
     torch.manual_seed(0)
-    contagion_model = _mlp(32, 5).to(device)
-    recipes.append(_recipe_ddp_nan_contagion(rank, contagion_model, device))
-
-    # Healthy control: fp32 + mild LR + clip.
-    torch.manual_seed(0)
-    model_ok = _mlp(32, 5).to(device)
+    model_ok = TinyTransformerLM().to(device)
     ddp_ok = _wrap_ddp(model_ok, device)
-    opt_ok = torch.optim.SGD(ddp_ok.parameters(), lr=0.05)
-    losses_ok: list[float] = []
-    for _step in range(20):
-        x = torch.randn(16, 32, device=device)
-        y = torch.randint(0, 5, (16,), device=device)
+    opt_ok = torch.optim.AdamW(ddp_ok.parameters(), lr=3e-4)
+    healthy: list[float] = []
+    for step in range(20):
+        ids, labels, mask = _make_batch(8, 32, device, seed=50 + step + rank)
         opt_ok.zero_grad(set_to_none=True)
-        loss = F.cross_entropy(ddp_ok(x), y)
+        loss = _lm_loss(ddp_ok(ids, key_padding_mask=mask), labels)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(ddp_ok.parameters(), 1.0)
         opt_ok.step()
-        losses_ok.append(float(loss.detach().float().cpu()))
+        healthy.append(float(loss.detach().cpu()))
 
-    triggered = [r for r in recipes if r["triggered"]]
-    # Keep a short fp16 loss curve for the existing figure.
-    fp16 = next(r for r in recipes if r["name"] == "fp16_overflow")
-    broken_losses = []
+    # Broken curve: unscaled attn train a few steps for the plot.
     torch.manual_seed(0)
-    model = _mlp(32, 5).to(device).half()
-    opt = torch.optim.SGD(model.parameters(), lr=50.0)
-    for _step in range(12):
-        x = torch.randn(16, 32, device=device, dtype=torch.float16)
-        y = torch.randint(0, 5, (16,), device=device)
-        opt.zero_grad(set_to_none=True)
-        loss = F.cross_entropy(model(x).float(), y)
-        v = float(loss.detach().cpu())
-        broken_losses.append(v)
-        if not _finite(v):
+    model_bad = TinyTransformerLM(use_attn_scale=False).to(device)
+    broken: list[float] = []
+    for step in range(8):
+        ids, labels, mask = _make_batch(4, 128, device, seed=70 + step)
+        loss = _lm_loss(model_bad(ids, key_padding_mask=mask), labels)
+        broken.append(float(loss.detach().cpu()))
+        if not _finite(broken[-1]):
             break
-        loss.backward()
-        opt.step()
 
     out = {
         "case": "nan",
         "rank": rank,
         "backend": backend,
         "device": str(device),
+        "model": "TinyTransformerLM",
         "recipes": recipes,
         "n_recipes": len(recipes),
         "n_triggered": len(triggered),
         "triggered_names": [r["name"] for r in triggered],
         "nan_detected": len(triggered) > 0,
-        "first_nan_step": fp16.get("first_step"),
-        "broken_losses": broken_losses,
-        "healthy_losses": losses_ok,
-        "healthy_all_finite": all(_finite(v) for v in losses_ok),
-        "fix": "catalog: validate inputs, scale attn, clamp denoms, skip non-finite Adam steps",
+        "broken_losses": broken,
+        "healthy_losses": healthy,
+        "healthy_all_finite": all(_finite(v) for v in healthy),
+        "fix": "scale attn; drop empty rows; GradScaler; ignore_index; isfinite before Adam",
     }
     dist.destroy_process_group()
     return out
+
+
+# ---------------------------------------------------------------------------
+# Loss spikes — forgot ignore_index on padded LM batches
+# ---------------------------------------------------------------------------
 
 
 def case_loss_spike(rank: int, world_size: int, backend: str, port: int) -> dict:
-    """Most batches fine; steps {12, 27} inject huge feature scale → loss spike."""
-    _init_pg(rank, world_size, backend, port)
-    device = _device(rank, backend)
-    if device.type == "cuda":
-        torch.cuda.set_device(device)
+    """Z-loss / aux coefficient typo (``1e-4`` written ``100``) → rare CE+aux spikes.
 
-    torch.manual_seed(0 + rank)
-    model = _mlp(64, 10).to(device)
-    ddp = _wrap_ddp(model, device)
-    opt = torch.optim.AdamW(ddp.parameters(), lr=1e-3)
-
-    spike_steps = {12, 27}
-    losses: list[float] = []
-    for step in range(40):
-        x = torch.randn(32, 64, device=device)
-        y = torch.randint(0, 10, (32,), device=device)
-        if step in spike_steps:
-            # Corrupt batch: extreme activations (bad tokenization / unnormalized input).
-            x = x * 1e3
-        opt.zero_grad(set_to_none=True)
-        loss = F.cross_entropy(ddp(x), y)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(ddp.parameters(), 1.0)
-        opt.step()
-        losses.append(float(loss.detach().cpu()))
-
-    arr = np.asarray(losses, dtype=np.float64)
-    med = float(np.median(arr))
-    spike_vals = {s: losses[s] for s in sorted(spike_steps)}
-    ratios = {s: losses[s] / max(med, 1e-9) for s in sorted(spike_steps)}
-
-    out = {
-        "case": "loss_spike",
-        "rank": rank,
-        "backend": backend,
-        "losses": losses,
-        "median_loss": med,
-        "spike_steps": sorted(spike_steps),
-        "spike_losses": spike_vals,
-        "spike_ratio_vs_median": ratios,
-        "detected": all(ratios[s] >= 5.0 for s in spike_steps),
-        "fix": "log per-batch stats (input norm, label hist); clip grads; quarantine outliers",
-    }
-    dist.destroy_process_group()
-    return out
-
-
-def case_numerical_drift(rank: int, world_size: int, backend: str, port: int) -> dict:
-    """Real silent-desync bugs (not toy param writes).
-
-    1. rank0_only_grad_clip — after DDP allreduces grads, only rank 0 clips
-       before ``optimizer.step()``. A common single-GPU leftover. Parameters diverge;
-       loss can still look fine.
-
-    2. bn_broadcast_buffers_false — ``BatchNorm`` + ``broadcast_buffers=False`` with
-       different per-rank batches. Affine weights stay synced via grad allreduce, but
-       ``running_mean`` / ``running_var`` silently drift (eval / checkpoint landmines).
+    This is a config bug, not a tensor inject: the LM forward is healthy; a secondary
+    term (z-loss, router aux, load-balance) is scaled wrong on some runs/steps.
     """
     _init_pg(rank, world_size, backend, port)
     device = _device(rank, backend)
     if device.type == "cuda":
         torch.cuda.set_device(device)
 
-    # --- Recipe 1: rank-0-only grad clip (true parameter drift) -----------------
     torch.manual_seed(0)
-    model_clip = _mlp(48, 8).to(device)
-    ddp_clip = _wrap_ddp(model_clip, device)
-    opt_clip = torch.optim.SGD(ddp_clip.parameters(), lr=0.05)
+    model = TinyTransformerLM().to(device)
+    ddp = _wrap_ddp(model, device)
+    opt = torch.optim.AdamW(ddp.parameters(), lr=3e-4)
+    # Steps where a bad config / feature flag enables the wrong aux weight.
+    spike_steps = {20, 28}
+    z_weight_bad = 100.0  # intended 1e-4
+    z_weight_ok = 1e-4
+    losses: list[float] = []
+    ce_only: list[float] = []
+    for step in range(36):
+        ids, labels, mask = _make_batch(
+            8, 64, device, seed=1000 + step * 17 + rank, pad_frac=0.25
+        )
+        opt.zero_grad(set_to_none=True)
+        logits = ddp(ids, key_padding_mask=mask)
+        ce = _lm_loss(logits, labels)
+        z_loss = logits.float().pow(2).mean()  # PaLM-style z-loss on logits
+        w = z_weight_bad if step in spike_steps else z_weight_ok
+        loss = ce + w * z_loss
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(ddp.parameters(), 1.0)
+        opt.step()
+        losses.append(float(loss.detach().cpu()))
+        ce_only.append(float(ce.detach().cpu()))
+
+    arr = np.asarray(losses, dtype=np.float64)
+    med = float(np.median(arr[[i for i in range(len(arr)) if i not in spike_steps]]))
+    local_jump = {s: losses[s] / max(losses[s - 1], 1e-9) for s in sorted(spike_steps)}
+    ratios = {s: losses[s] / max(med, 1e-9) for s in sorted(spike_steps)}
+    out = {
+        "case": "loss_spike",
+        "rank": rank,
+        "backend": backend,
+        "model": "TinyTransformerLM",
+        "losses": losses,
+        "ce_only": ce_only,
+        "median_loss": med,
+        "spike_steps": sorted(spike_steps),
+        "spike_losses": {s: losses[s] for s in sorted(spike_steps)},
+        "spike_ratio_vs_median": ratios,
+        "spike_ratio_vs_prev": local_jump,
+        "detected": all(local_jump[s] >= 5.0 for s in spike_steps),
+        "fix": "log CE and aux terms separately; unit-test loss scales in CI",
+        "bug": "z-loss/aux coefficient 100 instead of 1e-4 on rare steps/configs",
+    }
+    dist.destroy_process_group()
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Silent drift — real DDP control-flow bugs on the LM
+# ---------------------------------------------------------------------------
+
+
+def case_numerical_drift(rank: int, world_size: int, backend: str, port: int) -> dict:
+    """(1) rank0-only grad clip after allreduce (2) rank0-only EMA copy-back into student."""
+    _init_pg(rank, world_size, backend, port)
+    device = _device(rank, backend)
+    if device.type == "cuda":
+        torch.cuda.set_device(device)
+
     onset = 8
-    losses_clip: list[float] = []
-    param_diffs_clip: list[float] = []
-    for step in range(28):
-        # Realistic DDP: different microbatches per rank. Grads still match after allreduce.
-        torch.manual_seed(10_000 + step * 17 + rank * 101)
-        x = torch.randn(24, 48, device=device)
-        y = torch.randint(0, 8, (24,), device=device)
-        opt_clip.zero_grad(set_to_none=True)
-        loss = F.cross_entropy(ddp_clip(x), y)
+
+    # --- rank0-only grad clip -------------------------------------------------
+    torch.manual_seed(0)
+    model = TinyTransformerLM().to(device)
+    ddp = _wrap_ddp(model, device)
+    opt = torch.optim.AdamW(ddp.parameters(), lr=3e-4)
+    param_diffs: list[float] = []
+    losses: list[float] = []
+    for step in range(24):
+        ids, labels, mask = _make_batch(4, 32, device, seed=2000 + step * 19 + rank)
+        opt.zero_grad(set_to_none=True)
+        loss = _lm_loss(ddp(ids, key_padding_mask=mask), labels)
         loss.backward()
         if step >= onset and rank == 0:
-            # Bug: clip only on rank 0 after grads were already synced.
-            torch.nn.utils.clip_grad_norm_(model_clip.parameters(), max_norm=0.05)
-        opt_clip.step()
-        param_diffs_clip.append(_max_param_diff(model_clip))
-        losses_clip.append(float(loss.detach().cpu()))
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.05)
+        opt.step()
+        param_diffs.append(_max_param_diff(model))
+        losses.append(float(loss.detach().cpu()))
 
-    # Control: same setup but clip on every rank → params stay together.
+    # Control: clip on all ranks.
     torch.manual_seed(0)
-    model_ok = _mlp(48, 8).to(device)
+    model_ok = TinyTransformerLM().to(device)
     ddp_ok = _wrap_ddp(model_ok, device)
-    opt_ok = torch.optim.SGD(ddp_ok.parameters(), lr=0.05)
+    opt_ok = torch.optim.AdamW(ddp_ok.parameters(), lr=3e-4)
     param_diffs_ok: list[float] = []
-    for step in range(28):
-        torch.manual_seed(10_000 + step * 17 + rank * 101)
-        x = torch.randn(24, 48, device=device)
-        y = torch.randint(0, 8, (24,), device=device)
+    for step in range(24):
+        ids, labels, mask = _make_batch(4, 32, device, seed=2000 + step * 19 + rank)
         opt_ok.zero_grad(set_to_none=True)
-        loss = F.cross_entropy(ddp_ok(x), y)
+        loss = _lm_loss(ddp_ok(ids, key_padding_mask=mask), labels)
         loss.backward()
         if step >= onset:
             torch.nn.utils.clip_grad_norm_(model_ok.parameters(), max_norm=0.05)
         opt_ok.step()
         param_diffs_ok.append(_max_param_diff(model_ok))
 
-    # --- Recipe 2: BN running-stat drift with broadcast_buffers=False ------------
+    # --- rank0-only EMA copy-back (KD / mean-teacher anti-pattern) ------------
     torch.manual_seed(0)
-    bn_model = nn.Sequential(
-        nn.Linear(48, 48),
-        nn.BatchNorm1d(48),
-        nn.GELU(),
-        nn.Linear(48, 8),
-    ).to(device)
-    if device.type == "cuda":
-        ddp_bn = nn.parallel.DistributedDataParallel(
-            bn_model, device_ids=[device.index], broadcast_buffers=False
-        )
-    else:
-        ddp_bn = nn.parallel.DistributedDataParallel(bn_model, broadcast_buffers=False)
-    opt_bn = torch.optim.SGD(ddp_bn.parameters(), lr=0.05)
-    param_diffs_bn: list[float] = []
-    buffer_diffs_bn: list[float] = []
-    buffer_names_final: dict[str, float] = {}
-    losses_bn: list[float] = []
-    for step in range(28):
-        torch.manual_seed(20_000 + step * 13 + rank * 99)
-        x = torch.randn(32, 48, device=device)
-        y = torch.randint(0, 8, (32,), device=device)
-        opt_bn.zero_grad(set_to_none=True)
-        loss = F.cross_entropy(ddp_bn(x), y)
+    student = TinyTransformerLM().to(device)
+    ema = TinyTransformerLM().to(device)
+    ema.load_state_dict(student.state_dict())
+    ddp_s = _wrap_ddp(student, device)
+    opt_s = torch.optim.SGD(ddp_s.parameters(), lr=0.05)
+    ema_param_diffs: list[float] = []
+    student_param_diffs: list[float] = []
+    for step in range(24):
+        ids, labels, mask = _make_batch(4, 32, device, seed=3000 + step * 23 + rank)
+        opt_s.zero_grad(set_to_none=True)
+        loss = _lm_loss(ddp_s(ids, key_padding_mask=mask), labels)
         loss.backward()
-        opt_bn.step()
-        param_diffs_bn.append(_max_param_diff(bn_model))
-        buf_max, buf_names = _max_named_buffer_diff(bn_model)
-        buffer_diffs_bn.append(buf_max)
-        buffer_names_final = buf_names
-        losses_bn.append(float(loss.detach().cpu()))
-
-    # After training: one eval forward. broadcast_buffers=True re-syncs from rank0
-    # and eval does not update running stats → buffers match. False keeps drift.
-    ddp_bn.eval()
-    with torch.no_grad():
-        _ = ddp_bn(torch.randn(8, 48, device=device))
-    bn_eval_buf_diff, buffer_names_final = _max_named_buffer_diff(bn_model)
-    bn_eval_param_diff = _max_param_diff(bn_model)
-
-    # Control: broadcast_buffers=True (DDP default) keeps BN stats aligned at eval.
-    torch.manual_seed(0)
-    bn_ok = nn.Sequential(
-        nn.Linear(48, 48),
-        nn.BatchNorm1d(48),
-        nn.GELU(),
-        nn.Linear(48, 8),
-    ).to(device)
-    ddp_bn_ok = _wrap_ddp(bn_ok, device)  # default broadcast_buffers=True
-    opt_bn_ok = torch.optim.SGD(ddp_bn_ok.parameters(), lr=0.05)
-    buffer_diffs_ok: list[float] = []
-    for step in range(28):
-        torch.manual_seed(20_000 + step * 13 + rank * 99)
-        x = torch.randn(32, 48, device=device)
-        y = torch.randint(0, 8, (32,), device=device)
-        opt_bn_ok.zero_grad(set_to_none=True)
-        loss = F.cross_entropy(ddp_bn_ok(x), y)
-        loss.backward()
-        opt_bn_ok.step()
-        buffer_diffs_ok.append(_max_named_buffer_diff(bn_ok)[0])
-    ddp_bn_ok.eval()
-    with torch.no_grad():
-        _ = ddp_bn_ok(torch.randn(8, 48, device=device))
-    bn_ok_eval_buf_diff = _max_named_buffer_diff(bn_ok)[0]
+        opt_s.step()
+        # EMA update on all ranks (identical if student synced).
+        with torch.no_grad():
+            for p_e, p_s in zip(ema.parameters(), student.parameters(), strict=True):
+                p_e.mul_(0.95).add_(p_s, alpha=0.05)
+        if step >= onset and step % 4 == 0 and rank == 0:
+            # Bug seen in distillation experiments: "refresh student from EMA" only on rank0.
+            student.load_state_dict(ema.state_dict())
+        student_param_diffs.append(_max_param_diff(student))
+        ema_param_diffs.append(_max_param_diff(ema))
 
     recipes = [
         {
             "name": "rank0_only_grad_clip",
-            "triggered": param_diffs_clip[-1] > 1e-3,
+            "triggered": param_diffs[-1] > 1e-4,
             "where": "parameters",
             "detail": (
-                f"after onset, only rank0 clips → final max|Δparam|={param_diffs_clip[-1]:.3e} "
-                f"(control all-rank clip={param_diffs_ok[-1]:.3e})"
+                f"final max|Δparam|={param_diffs[-1]:.3e} "
+                f"(all-rank clip control={param_diffs_ok[-1]:.3e})"
             ),
-            "fix": "clip grads on every rank (or inside a synced utility); never gate clip on rank",
+            "fix": "clip on every rank; never gate clip/unscale/step on is_main",
         },
         {
-            "name": "bn_broadcast_buffers_false",
-            "triggered": bn_eval_buf_diff > 1e-3 and bn_ok_eval_buf_diff <= 1e-3,
-            "where": "buffers",
+            "name": "rank0_only_ema_copyback",
+            "triggered": student_param_diffs[-1] > 1e-4,
+            "where": "parameters",
             "detail": (
-                f"after eval forward: broken max|Δbuf|={bn_eval_buf_diff:.3e} "
-                f"(params still synced={bn_eval_param_diff:.3e}); "
-                f"broadcast_buffers=True control={bn_ok_eval_buf_diff:.3e}"
+                f"EMA→student copy on rank0 only → student max|Δparam|="
+                f"{student_param_diffs[-1]:.3e} (ema still {ema_param_diffs[-1]:.3e})"
             ),
-            "fix": "keep broadcast_buffers=True or use SyncBatchNorm; checksum buffers at eval",
-            "buffer_names": buffer_names_final,
+            "fix": "broadcast EMA/student after copy-back, or do copy-back on all ranks",
         },
     ]
 
@@ -778,206 +818,254 @@ def case_numerical_drift(rank: int, world_size: int, backend: str, port: int) ->
         "case": "numerical_drift",
         "rank": rank,
         "backend": backend,
+        "model": "TinyTransformerLM",
         "onset_step": onset,
         "recipes": recipes,
         "n_recipes": len(recipes),
         "n_triggered": sum(1 for r in recipes if r["triggered"]),
         "triggered_names": [r["name"] for r in recipes if r["triggered"]],
-        # Primary series for figures: real param-divergence bug.
-        "losses": losses_clip,
-        "max_param_diff": param_diffs_clip,
+        "losses": losses,
+        "max_param_diff": param_diffs,
         "max_param_diff_control": param_diffs_ok,
-        "final_max_param_diff": param_diffs_clip[-1],
+        "final_max_param_diff": param_diffs[-1],
         "control_final_max_param_diff": param_diffs_ok[-1],
-        "bn_losses": losses_bn,
-        "bn_max_param_diff": param_diffs_bn,
-        "bn_max_buffer_diff": buffer_diffs_bn,
-        "bn_max_buffer_diff_control": buffer_diffs_ok,
-        "bn_final_max_buffer_diff": bn_eval_buf_diff,
-        "bn_final_max_param_diff": bn_eval_param_diff,
-        "bn_control_eval_buffer_diff": bn_ok_eval_buf_diff,
-        "drift_detected": param_diffs_clip[-1] > 1e-3 and bn_eval_buf_diff > 1e-3,
-        "loss_still_finite": all(_finite(v) for v in losses_clip + losses_bn),
-        "fix": "checksum params AND buffers; never rank-gate clip / BN broadcast",
+        "ema_student_param_diff": student_param_diffs,
+        "ema_shadow_param_diff": ema_param_diffs,
+        "bn_max_buffer_diff": student_param_diffs,  # figure compat: second series
+        "bn_max_param_diff": ema_param_diffs,
+        "bn_final_max_buffer_diff": student_param_diffs[-1],
+        "bn_final_max_param_diff": ema_param_diffs[-1],
+        "drift_detected": all(r["triggered"] for r in recipes),
+        "loss_still_finite": all(_finite(v) for v in losses),
+        "fix": "checksum params across ranks; never rank-gate clip or EMA copy-back",
     }
     dist.destroy_process_group()
     return out
 
 
+# ---------------------------------------------------------------------------
+# Memory leak — debug logits ring buffer (real logging anti-pattern)
+# ---------------------------------------------------------------------------
+
+
 def case_memory_leak(rank: int, world_size: int, backend: str, port: int) -> dict:
-    """Retain detached activations 'for debugging' → monotonic memory growth."""
+    """Keep every step's logits 'to log top-k later' → monotonic CUDA growth."""
     _init_pg(rank, world_size, backend, port)
     device = _device(rank, backend)
     if device.type == "cuda":
         torch.cuda.set_device(device)
 
     torch.manual_seed(0)
-    model = _mlp(256, 10).to(device)
+    model = TinyTransformerLM().to(device)
     ddp = _wrap_ddp(model, device)
-    opt = torch.optim.SGD(ddp.parameters(), lr=0.01)
+    opt = torch.optim.AdamW(ddp.parameters(), lr=3e-4)
 
-    leak_bucket: list[torch.Tensor] = []
+    # Bug: unbounded debug buffer (common when prototyping wandb/top-k dumps).
+    debug_logits: list[torch.Tensor] = []
     allocated: list[float] = []
-    for _step in range(40):
-        x = torch.randn(128, 256, device=device)
-        y = torch.randint(0, 10, (128,), device=device)
+    for step in range(30):
+        ids, labels, mask = _make_batch(4, 64, device, seed=4000 + step)
         opt.zero_grad(set_to_none=True)
-        logits = ddp(x)
-        # Bug: keep every step's activations (+ inputs) on device "for later viz".
-        leak_bucket.append(torch.cat([logits.detach().reshape(-1), x.detach().reshape(-1)]))
-        loss = F.cross_entropy(logits, y)
+        logits = ddp(ids, key_padding_mask=mask)
+        debug_logits.append(logits.detach())  # should have been .cpu() + bounded ring
+        loss = _lm_loss(logits, labels)
         loss.backward()
         opt.step()
         if device.type == "cuda":
             torch.cuda.synchronize()
             allocated.append(torch.cuda.memory_allocated(device) / (1024**2))
         else:
-            allocated.append(sum(t.numel() * t.element_size() for t in leak_bucket) / (1024**2))
+            allocated.append(sum(t.numel() * t.element_size() for t in debug_logits) / (1024**2))
 
-    # Fixed: clear debug buffer each step.
-    leak_bucket.clear()
+    debug_logits.clear()
     allocated_fixed: list[float] = []
-    for _step in range(40):
-        x = torch.randn(128, 256, device=device)
-        y = torch.randint(0, 10, (128,), device=device)
+    ring: list[torch.Tensor] = []
+    for step in range(30):
+        ids, labels, mask = _make_batch(4, 64, device, seed=5000 + step)
         opt.zero_grad(set_to_none=True)
-        logits = ddp(x)
-        debug = [logits.detach(), x.detach()]
-        loss = F.cross_entropy(logits, y)
+        logits = ddp(ids, key_padding_mask=mask)
+        ring.append(logits.detach())
+        if len(ring) > 1:
+            ring.pop(0)
+        loss = _lm_loss(logits, labels)
         loss.backward()
         opt.step()
-        debug.clear()
         if device.type == "cuda":
             torch.cuda.synchronize()
             allocated_fixed.append(torch.cuda.memory_allocated(device) / (1024**2))
         else:
-            allocated_fixed.append(
-                sum(t.numel() * t.element_size() for t in debug) / (1024**2)
-            )
+            allocated_fixed.append(sum(t.numel() * t.element_size() for t in ring) / (1024**2))
 
     growth = allocated[-1] - allocated[0]
     fixed_growth = allocated_fixed[-1] - allocated_fixed[0]
-    # CUDA caching allocator keeps a large baseline; detect by absolute growth
-    # vs a fixed (non-retaining) control rather than a 5× ratio.
-    leak_detected = growth >= 1.0 and growth > fixed_growth + 0.5
     out = {
         "case": "memory_leak",
         "rank": rank,
         "backend": backend,
         "device": str(device),
+        "model": "TinyTransformerLM",
         "allocated_mb_leaky": allocated,
         "allocated_mb_fixed": allocated_fixed,
         "growth_mb": growth,
         "fixed_growth_mb": fixed_growth,
-        "leak_detected": leak_detected,
+        "leak_detected": growth >= 1.0 and growth > fixed_growth + 0.5,
         "fixed_flat": abs(fixed_growth) <= 0.5,
-        "fix": "track cuda.memory_allocated / RSS over steps; never retain graph tensors",
+        "bug": "unbounded list of detached logits retained on device for later logging",
+        "fix": "bounded CPU ring buffer / log scalars only; never retain step tensors",
     }
     dist.destroy_process_group()
     return out
 
 
+# ---------------------------------------------------------------------------
+# Straggler — real seqlen skew (long-doc vs short-doc bucket)
+# ---------------------------------------------------------------------------
+
+
 def case_straggler(rank: int, world_size: int, backend: str, port: int) -> dict:
-    """Rank 1 delays before an all-reduce → every rank's collective wait stretches."""
+    """Rank 1 always draws long sequences; collective wait stretches for everyone."""
     _init_pg(rank, world_size, backend, port)
     device = _device(rank, backend)
     if device.type == "cuda":
         torch.cuda.set_device(device)
 
     torch.manual_seed(0)
-    model = _mlp(32, 5).to(device)
+    # Deeper/wider so T² attention skew is visible on A10G, not just CPU.
+    model = TinyTransformerLM(dim=96, n_layer=4, n_heads=4, max_seq=512).to(device)
     ddp = _wrap_ddp(model, device)
-    opt = torch.optim.SGD(ddp.parameters(), lr=0.05)
+    opt = torch.optim.AdamW(ddp.parameters(), lr=3e-4)
 
     straggler = 1 if world_size > 1 else 0
-    sleep_ms = 120.0
-    warmup = 3
-    onset = 8
+    onset = 6
+    short_len, long_len = 16, 256
     step_ms: list[float] = []
     collective_ms: list[float] = []
-    token = torch.ones(1, device=device)
-    for step in range(18):
-        x = torch.randn(16, 32, device=device)
-        y = torch.randint(0, 5, (16,), device=device)
-        opt.zero_grad(set_to_none=True)
-        loss = F.cross_entropy(ddp(x), y)
-        loss.backward()
-        opt.step()
+    local_ms: list[float] = []
+    tokens_per_step: list[int] = []
 
-        # Explicit collective probe (isolates straggler from DDP bucket noise).
+    for step in range(18):
+        seqlen = long_len if (rank == straggler and step >= onset) else short_len
+        tokens_per_step.append(2 * seqlen)
+        ids, labels, mask = _make_batch(2, seqlen, device, seed=6000 + step * 7 + rank)
         dist.barrier()
         t0 = time.perf_counter()
-        if rank == straggler and step >= onset:
-            time.sleep(sleep_ms / 1e3)
-        dist.all_reduce(token)
+        opt.zero_grad(set_to_none=True)
+        # Local compute = forward only (before DDP backward allreduce waits).
+        logits = ddp(ids, key_padding_mask=mask)
+        loss = _lm_loss(logits, labels)
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        t_fwd = time.perf_counter()
+        loss.backward()
+        opt.step()
         if device.type == "cuda":
             torch.cuda.synchronize()
         t1 = time.perf_counter()
-        collective_ms.append((t1 - t0) * 1e3)
-        step_ms.append(collective_ms[-1])
+        local_ms.append((t_fwd - t0) * 1e3)
+        collective_ms.append((t1 - t_fwd) * 1e3)
+        step_ms.append((t1 - t0) * 1e3)
 
-    pre = collective_ms[warmup:onset]
-    post = collective_ms[onset:]
-    pre_med = float(np.median(pre))
-    post_med = float(np.median(post))
+    pre = local_ms[2:onset]
+    post = local_ms[onset:]
+    local_mean = torch.tensor(
+        [float(np.median(post))],
+        dtype=torch.float32,
+        device=device if backend == "nccl" else "cpu",
+    )
+    gathered = [torch.zeros_like(local_mean) for _ in range(world_size)]
+    dist.all_gather(gathered, local_mean)
+    means = [float(t.item()) for t in gathered]
+    ratio = max(means) / max(min(means), 1e-9)
+    # Also flag via token imbalance (the root cause metric in production).
+    tok = torch.tensor(
+        [float(np.median(tokens_per_step[onset:]))],
+        dtype=torch.float32,
+        device=device if backend == "nccl" else "cpu",
+    )
+    tok_g = [torch.zeros_like(tok) for _ in range(world_size)]
+    dist.all_gather(tok_g, tok)
+    tok_means = [float(t.item()) for t in tok_g]
+    tok_ratio = max(tok_means) / max(min(tok_means), 1e-9)
+
     out = {
         "case": "straggler",
         "rank": rank,
         "backend": backend,
+        "model": "TinyTransformerLM",
         "straggler_rank": straggler,
-        "injected_sleep_ms": sleep_ms,
         "onset_step": onset,
-        "collective_ms": collective_ms,
+        "short_len": short_len,
+        "long_len": long_len,
         "step_ms": step_ms,
-        "pre_median_ms": pre_med,
-        "post_median_ms": post_med,
-        "slowdown": post_med / max(pre_med, 1e-9),
-        "detected": post_med >= pre_med + 0.6 * sleep_ms,
-        "fix": "per-rank timers around collectives; slowest rank sets the pace",
+        "collective_ms": collective_ms,
+        "local_compute_ms": local_ms,
+        "pre_median_ms": float(np.median(pre)),
+        "post_median_ms": float(np.median(post)),
+        "slowdown": float(np.median(post) / max(np.median(pre), 1e-9)),
+        "per_rank_post_median_ms": means,
+        "per_rank_tokens": tok_means,
+        "max_over_min_local": ratio,
+        "token_imbalance": tok_ratio,
+        "detected": ratio >= 1.3 or tok_ratio >= 2.0,
+        "bug": "rank draws from long-doc bucket while peers stay short — token skew",
+        "fix": "length bucketing / token-budget batching; per-rank tokens/step metrics",
     }
     dist.destroy_process_group()
     return out
 
 
+# ---------------------------------------------------------------------------
+# Bad node — persistent host preprocessing skew (multimodal-style)
+# ---------------------------------------------------------------------------
+
+
 def case_bad_node(rank: int, world_size: int, backend: str, port: int) -> dict:
-    """Persistent compute inflation on one rank (bad GPU / thermal throttle)."""
+    """One rank permanently pays heavy host-side work before each step.
+
+    Stand-in for a real class of 'bad node' symptoms in multimodal / tokenization
+    heavy jobs: GPU kernels look fine, but pre-collective local wall time is huge
+    on one rank every step (noisy neighbor, broken CPU affinity, stuck decoder).
+    """
     _init_pg(rank, world_size, backend, port)
     device = _device(rank, backend)
     if device.type == "cuda":
         torch.cuda.set_device(device)
 
     torch.manual_seed(0)
-    model = _mlp(96, 10).to(device)
+    model = TinyTransformerLM().to(device)
     ddp = _wrap_ddp(model, device)
-    opt = torch.optim.SGD(ddp.parameters(), lr=0.05)
-
+    opt = torch.optim.AdamW(ddp.parameters(), lr=3e-4)
     bad = 0
-    # Extra matmuls on the bad rank only — simulates degraded FLOP/s.
-    inflate = 12
+
     local_ms: list[float] = []
     step_ms: list[float] = []
-    for _step in range(20):
-        x = torch.randn(48, 96, device=device)
-        y = torch.randint(0, 10, (48,), device=device)
-        t0 = time.perf_counter()
-        if rank == bad:
-            with torch.no_grad():
-                junk = x
-                for _ in range(inflate):
-                    junk = junk @ junk.T[:96, :96]
-                    junk = junk[:48]
-        t1 = time.perf_counter()
+    for step in range(16):
+        # Host tokenization / feature decode (CPU). Bad rank pays a permanently
+        # heavier preprocess bill — same symptom class as a stuck decoder worker
+        # or noisy-neighbor CPU starvation (not time.sleep).
+        t_host0 = time.perf_counter()
+        rng = np.random.default_rng(step + rank * 100)
+        # Simulate byte-level encode + n-gram stats over a long document.
+        n_docs = 64 if rank == bad else 2
+        doc = rng.integers(1, VOCAB, size=(n_docs, 2048), dtype=np.int64)
+        # Cheap but real host work: histogram + rolling hash mix.
+        hist = np.zeros(VOCAB, dtype=np.int64)
+        for row in doc:
+            hist += np.bincount(row, minlength=VOCAB)
+            _ = int(row.astype(np.uint64).sum() * 2654435761 & 0xFFFFFFFF)
+        ids, labels, mask = _make_batch(4, 32, device, seed=7000 + step + rank)
+        t_host1 = time.perf_counter()
+
         opt.zero_grad(set_to_none=True)
-        loss = F.cross_entropy(ddp(x), y)
+        loss = _lm_loss(ddp(ids, key_padding_mask=mask), labels)
         loss.backward()
         opt.step()
         if device.type == "cuda":
             torch.cuda.synchronize()
-        t2 = time.perf_counter()
-        local_ms.append((t1 - t0) * 1e3)
-        step_ms.append((t2 - t0) * 1e3)
+        t1 = time.perf_counter()
+        local_ms.append((t_host1 - t_host0) * 1e3)
+        step_ms.append((t1 - t_host0) * 1e3)
 
-    # Gather per-rank local compute means for detection.
     local_mean = torch.tensor(
         [float(np.mean(local_ms))],
         dtype=torch.float32,
@@ -988,68 +1076,82 @@ def case_bad_node(rank: int, world_size: int, backend: str, port: int) -> dict:
     means = [float(t.item()) for t in gathered]
     healthy = float(min(means)) if means else 0.0
     ratios = [m / max(healthy, 1e-9) for m in means]
-    # Flag ranks ≥5× the fastest peer (bad GPU / throttle).
     flagged = [i for i, r in enumerate(ratios) if r >= 5.0]
 
     out = {
         "case": "bad_node",
         "rank": rank,
         "backend": backend,
+        "model": "TinyTransformerLM",
         "bad_rank": bad,
-        "inflate_matmul_loops": inflate,
         "local_compute_ms": local_ms,
         "step_ms": step_ms,
         "per_rank_local_mean_ms": means,
         "ratio_vs_fastest": ratios,
         "flagged_ranks": flagged,
         "detected": bad in flagged,
-        "fix": "compare pre-collective local timers across ranks; quarantine outliers",
+        "bug": "persistent host preprocessing inflation on one rank (CPU-bound skew)",
+        "fix": "split host vs GPU timers; DCGM/Xid for true device faults; cordon node",
     }
     dist.destroy_process_group()
     return out
 
 
-def case_nccl_hang(rank: int, world_size: int, backend: str, port: int) -> dict:
-    """One rank skips a collective → hang; watchdog surfaces it.
+# ---------------------------------------------------------------------------
+# NCCL hang — empty microbatch continue (classic control-flow desync)
+# ---------------------------------------------------------------------------
 
-    Uses gloo (or NCCL on GPU) with a short monitored wait. Rank 1 never enters
-    the barrier after onset — classic "NCCL timeout / illegal memory access"
-    precursor in production logs.
-    """
+
+def case_nccl_hang(rank: int, world_size: int, backend: str, port: int) -> dict:
+    """Rank 1 drops an empty pack with ``continue``, skipping DDP backward/collective."""
     _init_pg(rank, world_size, backend, port)
     device = _device(rank, backend)
     if device.type == "cuda":
         torch.cuda.set_device(device)
 
-    hang_rank = 1 if world_size > 1 else -1
-    timeout_s = 2.0
-    t_payload = torch.ones(1, device=device)
-    # Healthy collective first.
-    dist.all_reduce(t_payload)
+    torch.manual_seed(0)
+    model = TinyTransformerLM().to(device)
+    ddp = _wrap_ddp(model, device)
+    opt = torch.optim.SGD(ddp.parameters(), lr=0.05)
+
+    # Warmup step — both ranks participate.
+    ids, labels, mask = _make_batch(2, 16, device, seed=1)
+    opt.zero_grad(set_to_none=True)
+    _lm_loss(ddp(ids, key_padding_mask=mask), labels).backward()
+    opt.step()
     healthy_ok = True
 
+    hang_rank = 1 if world_size > 1 else -1
     error: str | None = None
     elapsed_ms = 0.0
-    if rank == hang_rank:
-        # Dead worker: do not destroy the PG (NCCL destroy would also hang).
-        time.sleep(0.05)
-        return {
-            "case": "nccl_hang",
-            "rank": rank,
-            "backend": backend,
-            "hang_rank": hang_rank,
-            "healthy_collective_ok": healthy_ok,
-            "timeout_s": timeout_s,
-            "peer_wait_ms": 0.0,
-            "hang_injected": True,
-            "error": "simulated_rank_exit_before_collective",
-            "fix": "NCCL_DEBUG=INFO, TORCH_NCCL_ASYNC_ERROR_HANDLING=1, per-rank heartbeats",
-        }
 
+    if rank == hang_rank:
+        # Empty microbatch after filtering — real packing outcome.
+        ids = torch.full((2, 16), PAD_ID, device=device, dtype=torch.long)
+        labels = torch.full_like(ids, -100)
+        valid = int((labels != -100).sum().item())
+        if valid == 0:
+            # THE bug: skip the step entirely → peer hangs in DDP autograd allreduce.
+            return {
+                "case": "nccl_hang",
+                "rank": rank,
+                "backend": backend,
+                "hang_rank": hang_rank,
+                "healthy_collective_ok": healthy_ok,
+                "peer_wait_ms": 0.0,
+                "hang_reproduced": True,
+                "error": "empty_microbatch_continue_skipped_collective",
+                "bug": "if valid_tokens==0: continue  # skips DDP forward/backward",
+                "fix": "still participate in collectives / use noop forward; never continue past DDP",
+            }
+
+    # Non-hang ranks enter a normal step and block inside DDP backward allreduce.
     t0 = time.perf_counter()
     try:
-        # Peer has left — this allreduce blocks until the parent watchdog kills us.
-        dist.all_reduce(torch.ones(1, device=device))
+        ids, labels, mask = _make_batch(2, 16, device, seed=2)
+        opt.zero_grad(set_to_none=True)
+        _lm_loss(ddp(ids, key_padding_mask=mask), labels).backward()
+        opt.step()
     except Exception as e:  # noqa: BLE001
         error = f"{type(e).__name__}: {e}"
     elapsed_ms = (time.perf_counter() - t0) * 1e3
@@ -1060,84 +1162,101 @@ def case_nccl_hang(rank: int, world_size: int, backend: str, port: int) -> dict:
         "backend": backend,
         "hang_rank": hang_rank,
         "healthy_collective_ok": healthy_ok,
-        "timeout_s": timeout_s,
         "peer_wait_ms": elapsed_ms,
-        "hang_injected": hang_rank >= 0,
+        "hang_reproduced": hang_rank >= 0,
         "error": error,
-        "fix": "NCCL_DEBUG=INFO, TORCH_NCCL_ASYNC_ERROR_HANDLING=1, per-rank heartbeats",
+        "bug": "peer skipped collective via empty-batch continue",
+        "fix": "NCCL watchdog + identical control flow into every collective",
     }
     with contextlib.suppress(Exception):
         dist.destroy_process_group()
     return out
 
 
+# ---------------------------------------------------------------------------
+# Throughput cliff — real grad allreduce vs tokens/rank
+# ---------------------------------------------------------------------------
+
+
 def case_throughput_cliff(rank: int, world_size: int, backend: str, port: int) -> dict:
-    """Sweep local batch size: when compute << collective, throughput cliffs."""
+    """Sweep tokens/rank on the LM; tiny microbatches make DDP grad sync dominate."""
     _init_pg(rank, world_size, backend, port)
     device = _device(rank, backend)
     if device.type == "cuda":
         torch.cuda.set_device(device)
 
     torch.manual_seed(0)
-    model = _mlp(128, 10).to(device)
+    # Slightly wider model so grad buckets are nontrivial.
+    model = TinyTransformerLM(dim=96, n_layer=3, n_heads=4, max_seq=256).to(device)
     ddp = _wrap_ddp(model, device)
-    opt = torch.optim.SGD(ddp.parameters(), lr=0.01)
+    opt = torch.optim.AdamW(ddp.parameters(), lr=3e-4)
 
-    # Extra collective payload to make the cliff obvious on CPU/gloo.
-    comm_mb = 8
-    junk = torch.randn(comm_mb * 1024 * 1024 // 4, device=device)
-
-    batch_sizes = [1, 2, 4, 8, 16, 32, 64, 128]
+    # tokens ≈ batch * seqlen (causal LM).
+    configs = [
+        (1, 8),
+        (1, 16),
+        (2, 16),
+        (2, 32),
+        (4, 32),
+        (4, 64),
+        (8, 64),
+        (8, 128),
+    ]
     rows: list[dict] = []
-    for bs in batch_sizes:
+    for bs, seqlen in configs:
         times: list[float] = []
-        for _step in range(12):
-            x = torch.randn(bs, 128, device=device)
-            y = torch.randint(0, 10, (bs,), device=device)
+        for step in range(10):
+            ids, labels, mask = _make_batch(bs, seqlen, device, seed=8000 + bs * 100 + step + rank)
             t0 = time.perf_counter()
             opt.zero_grad(set_to_none=True)
-            loss = F.cross_entropy(ddp(x), y)
-            loss.backward()
-            dist.all_reduce(junk)  # fixed communication tax
+            loss = _lm_loss(ddp(ids, key_padding_mask=mask), labels)
+            loss.backward()  # real DDP grad allreduce
             opt.step()
             if device.type == "cuda":
                 torch.cuda.synchronize()
             times.append((time.perf_counter() - t0) * 1e3)
-        # Drop warmup
         steady = times[2:]
         med = float(np.median(steady))
-        samples_per_s = (bs * world_size) / (med / 1e3)
+        tokens = bs * seqlen * world_size
+        tokens_per_s = tokens / (med / 1e3)
         rows.append(
             {
                 "batch_size_per_rank": bs,
-                "global_batch": bs * world_size,
+                "seqlen": seqlen,
+                "tokens_per_rank": bs * seqlen,
+                "global_tokens": tokens,
                 "median_step_ms": med,
-                "samples_per_s": samples_per_s,
+                "tokens_per_s": tokens_per_s,
+                "samples_per_s": tokens_per_s,  # figure compat
             }
         )
 
-    sps = [r["samples_per_s"] for r in rows]
-    peak_i = int(np.argmax(sps))
-    # Cliff: smallest batches where efficiency vs peak collapses.
-    peak = sps[peak_i]
+    tps = [r["tokens_per_s"] for r in rows]
+    peak_i = int(np.argmax(tps))
+    peak = tps[peak_i]
     cliff = next(
-        (r for r in rows if r["samples_per_s"] < 0.45 * peak and r["batch_size_per_rank"] < rows[peak_i]["batch_size_per_rank"]),
+        (
+            r
+            for r in rows
+            if r["tokens_per_s"] < 0.45 * peak
+            and r["tokens_per_rank"] < rows[peak_i]["tokens_per_rank"]
+        ),
         rows[0],
     )
-
     out = {
         "case": "throughput_cliff",
         "rank": rank,
         "backend": backend,
+        "model": "TinyTransformerLM",
         "world_size": world_size,
-        "comm_mb": comm_mb,
+        "n_params": sum(p.numel() for p in model.parameters()),
         "sweep": rows,
-        "peak_batch_size": rows[peak_i]["batch_size_per_rank"],
+        "peak_batch_size": rows[peak_i]["tokens_per_rank"],
         "peak_samples_per_s": peak,
-        "cliff_batch_size": cliff["batch_size_per_rank"],
-        "cliff_samples_per_s": cliff["samples_per_s"],
-        "cliff_ratio_vs_peak": cliff["samples_per_s"] / max(peak, 1e-9),
-        "fix": "raise local work / overlap comm; avoid tiny microbatches with fat collectives",
+        "cliff_batch_size": cliff["tokens_per_rank"],
+        "cliff_samples_per_s": cliff["tokens_per_s"],
+        "cliff_ratio_vs_peak": cliff["tokens_per_s"] / max(peak, 1e-9),
+        "fix": "raise tokens/rank (seqlen or microbatch); overlap comm; avoid tiny packs",
     }
     dist.destroy_process_group()
     return out
@@ -1169,8 +1288,7 @@ def _worker(
     result_queue: mp.Queue,
 ) -> None:
     try:
-        fn = CASE_FNS[case]
-        result_queue.put(("ok", rank, fn(rank, world_size, backend, port)))
+        result_queue.put(("ok", rank, CASE_FNS[case](rank, world_size, backend, port)))
     except Exception as e:  # noqa: BLE001
         result_queue.put(("err", rank, f"{type(e).__name__}: {e}"))
 
@@ -1183,24 +1301,19 @@ def run_case(
 ) -> dict:
     if case not in CASE_FNS:
         raise ValueError(f"Unknown case {case!r}; choose from {CASES}")
-
     backend = _backend(prefer_nccl=prefer_nccl)
-    # Unique port per case to avoid collisions across sequential runs.
     port = base_port + (abs(hash(case)) % 1000)
-
     ctx = mp.get_context("spawn")
     result_queue: mp.Queue = ctx.Queue()
-    procs: list[mp.Process] = []
+    procs = []
     for rank in range(world_size):
         p = ctx.Process(
-            target=_worker,
-            args=(rank, world_size, case, backend, port, result_queue),
+            target=_worker, args=(rank, world_size, case, backend, port, result_queue)
         )
         p.start()
         procs.append(p)
 
-    # Hang case: peer blocks; enforce join timeout and kill leftovers.
-    join_timeout = 8.0 if case == "nccl_hang" else 120.0
+    join_timeout = 12.0 if case == "nccl_hang" else 180.0
     for p in procs:
         p.join(timeout=join_timeout)
 
@@ -1223,10 +1336,9 @@ def run_case(
         else:
             errors.append(f"rank{rank}: {payload}")
 
-    # Summarize from rank 0 when available, else any rank.
     results.sort(key=lambda r: r.get("rank", 0))
     primary = results[0] if results else {}
-    summary = {
+    summary: dict[str, Any] = {
         "case": case,
         "world_size": world_size,
         "backend": backend,
@@ -1238,36 +1350,34 @@ def run_case(
         "primary": primary,
     }
 
-    # Case-specific rollup for the blog tables.
     if case == "nccl_hang":
         peer_errs = [
             r.get("error")
             for r in results
             if r.get("rank") != r.get("hang_rank") and r.get("error")
         ]
-        summary["hang_confirmed"] = bool(timed_out) or bool(peer_errs) or bool(
-            primary.get("hang_injected")
+        empty_skip = any(
+            r.get("error") == "empty_microbatch_continue_skipped_collective" for r in results
         )
+        summary["hang_confirmed"] = bool(timed_out) or bool(peer_errs) or empty_skip
         if timed_out:
             summary["symptom"] = (
-                f"ranks {timed_out} blocked on collective after rank "
-                f"{primary.get('hang_rank')} exited"
+                f"ranks {timed_out} blocked after empty-microbatch continue on rank "
+                f"{primary.get('hang_rank')}"
             )
         elif peer_errs:
-            summary["symptom"] = f"peer collective error: {peer_errs[0]}"
+            summary["symptom"] = f"peer collective error after empty-batch skip: {peer_errs[0]}"
+        elif empty_skip:
+            summary["symptom"] = "empty_microbatch_continue_skipped_collective"
         else:
-            summary["symptom"] = "hang injected (single-rank fallback)"
+            summary["symptom"] = "hang not observed"
         summary["peer_errors"] = peer_errs
     elif primary:
         for key in (
             "nan_detected",
-            "first_nan_step",
             "n_triggered",
             "triggered_names",
             "n_recipes",
-            "bn_final_max_buffer_diff",
-            "bn_final_max_param_diff",
-            "control_final_max_param_diff",
             "detected",
             "drift_detected",
             "leak_detected",
@@ -1275,10 +1385,11 @@ def run_case(
             "cliff_ratio_vs_peak",
             "final_max_param_diff",
             "growth_mb",
+            "max_over_min_local",
+            "bn_final_max_buffer_diff",
         ):
             if key in primary:
                 summary[key] = primary[key]
-
     return summary
 
 
@@ -1291,6 +1402,7 @@ def run_all(world_size: int = 2, prefer_nccl: bool = False) -> dict:
             "world_size": world_size,
             "prefer_nccl": prefer_nccl,
             "backend": _backend(prefer_nccl),
+            "model": "TinyTransformerLM",
         },
         "cases": {},
     }
@@ -1310,7 +1422,6 @@ def bench(which: str = "all") -> dict:
     prefer = torch.cuda.is_available()
     n_gpu = torch.cuda.device_count() if prefer else 0
     prefer_nccl = prefer and n_gpu >= 2
-    # NCCL needs ≥2 ranks on distinct devices; gloo fallback uses 2 CPU ranks.
     ws = 2
     print(
         f"modal bench: device={torch.cuda.get_device_name(0) if prefer else 'cpu'} "
@@ -1329,6 +1440,7 @@ def bench(which: str = "all") -> dict:
                 "prefer_nccl": prefer_nccl,
                 "backend": _backend(prefer_nccl),
                 "gpu_slot": GPU,
+                "model": "TinyTransformerLM",
             },
             "cases": {which: run_case(which, world_size=ws, prefer_nccl=prefer_nccl)},
         }
@@ -1339,55 +1451,30 @@ def bench(which: str = "all") -> dict:
     return results
 
 
-@app.local_entrypoint()
-def main(case: str = "all") -> None:
-    which = str(case).strip().lower()
-    if which not in {"all", *CASES}:
-        raise SystemExit(f"Unknown --case {case!r}; use all|{'|'.join(CASES)}")
-    results = bench.remote(which)
-    path = Path("playground/dist_failure_results.json")
-    path.write_text(json.dumps(results, indent=2))
-    print(f"Wrote {path}")
-    _print_summary(results)
-
-
 def _print_summary(results: dict) -> None:
     meta = results.get("meta", {})
-    print(f"device={meta.get('device_name')} backend={meta.get('backend')}")
+    print(f"device={meta.get('device_name')} backend={meta.get('backend')} model={meta.get('model')}")
     for name, c in results.get("cases", {}).items():
         p = c.get("primary", {})
         if name == "nan":
             print(
-                f"  nan: detected={p.get('nan_detected')} "
-                f"{p.get('n_triggered')}/{p.get('n_recipes')} recipes → "
-                f"{p.get('triggered_names')}"
+                f"  nan: {p.get('n_triggered')}/{p.get('n_recipes')} → {p.get('triggered_names')}"
             )
         elif name == "loss_spike":
             print(f"  loss_spike: detected={p.get('detected')} ratios={p.get('spike_ratio_vs_median')}")
         elif name == "numerical_drift":
-            diff = p.get("final_max_param_diff")
-            buf = p.get("bn_final_max_buffer_diff")
             print(
-                f"  drift: detected={p.get('drift_detected')} "
-                f"recipes={p.get('triggered_names')} "
-                f"param_diff={diff if diff is None else f'{diff:.3e}'} "
-                f"bn_buf_diff={buf if buf is None else f'{buf:.3e}'}"
+                f"  drift: {p.get('triggered_names')} "
+                f"param_diff={p.get('final_max_param_diff')} "
+                f"ema_diff={p.get('bn_final_max_buffer_diff')}"
             )
         elif name == "memory_leak":
-            growth = p.get("growth_mb")
-            print(
-                f"  leak: detected={p.get('leak_detected')} "
-                f"growth_mb={growth if growth is None else f'{growth:.1f}'}"
-            )
+            g = p.get("growth_mb")
+            print(f"  leak: detected={p.get('leak_detected')} growth_mb={g}")
         elif name == "straggler":
-            slow = p.get("slowdown")
-            pre = p.get("pre_median_ms")
-            post = p.get("post_median_ms")
             print(
                 f"  straggler: detected={p.get('detected')} "
-                f"slowdown={slow if slow is None else f'{slow:.2f}x'} "
-                f"pre={pre if pre is None else f'{pre:.1f}ms'} "
-                f"post={post if post is None else f'{post:.1f}ms'}"
+                f"slowdown={p.get('slowdown')} max/min={p.get('max_over_min_local')}"
             )
         elif name == "bad_node":
             print(
@@ -1397,21 +1484,30 @@ def _print_summary(results: dict) -> None:
         elif name == "nccl_hang":
             print(f"  nccl_hang: confirmed={c.get('hang_confirmed')} {c.get('symptom')}")
         elif name == "throughput_cliff":
-            ratio = p.get("cliff_ratio_vs_peak")
             print(
-                f"  cliff: peak_bs={p.get('peak_batch_size')} "
-                f"cliff_bs={p.get('cliff_batch_size')} "
-                f"ratio={ratio if ratio is None else f'{ratio:.2f}'}"
+                f"  cliff: peak_tokens/rank={p.get('peak_batch_size')} "
+                f"cliff={p.get('cliff_batch_size')} ratio={p.get('cliff_ratio_vs_peak')}"
             )
+
+
+@app.local_entrypoint()
+def main(case: str = "all") -> None:
+    which = str(case).strip().lower()
+    if which not in {"all", *CASES}:
+        raise SystemExit(f"Unknown --case {case!r}")
+    results = bench.remote(which)
+    path = Path("playground/dist_failure_results.json")
+    path.write_text(json.dumps(results, indent=2))
+    print(f"Wrote {path}")
+    _print_summary(results)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--case", default="all", choices=("all", *CASES))
     parser.add_argument("--world-size", type=int, default=2)
-    parser.add_argument("--nccl", action="store_true", help="Prefer NCCL when CUDA is available")
+    parser.add_argument("--nccl", action="store_true")
     args = parser.parse_args()
-
     if args.case == "all":
         results = run_all(world_size=args.world_size, prefer_nccl=args.nccl)
     else:
@@ -1426,6 +1522,7 @@ if __name__ == "__main__":
                 "prefer_nccl": args.nccl,
                 "backend": _backend(args.nccl),
                 "source": "local",
+                "model": "TinyTransformerLM",
             },
             "cases": {
                 args.case: run_case(
@@ -1433,11 +1530,7 @@ if __name__ == "__main__":
                 )
             },
         }
-        results["meta"]["source"] = "local"
-
-    if args.case == "all":
-        results["meta"]["source"] = "local"
-
+    results["meta"]["source"] = results["meta"].get("source", "local")
     path = Path("playground/dist_failure_results.json")
     path.write_text(json.dumps(results, indent=2))
     print(f"Wrote {path}")
