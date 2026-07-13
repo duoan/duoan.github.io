@@ -179,14 +179,125 @@ def architecture_figure(out: Path) -> None:
     plt.close(fig)
 
 
+def overhead_figures(overhead: dict, out: Path) -> None:
+    """Bar chart of step-time overhead + RSS growth from Modal remasurement."""
+    rows = [r for r in overhead["summary"] if r.get("ok")]
+    labels = {
+        "baseline": "baseline",
+        "argus_semantics": "ARGUS-style\nsemantics",
+        "torch_profiler_cuda": "torch.profiler\n(CUDA only)",
+        "torch_profiler_full": "torch.profiler\n(CPU+CUDA+stack)",
+        "nsys": "nsys\nalways-on",
+    }
+    colors = {
+        "baseline": "#94a3b8",
+        "argus_semantics": "#55A868",
+        "torch_profiler_cuda": "#C44E52",
+        "torch_profiler_full": "#8B1E1E",
+        "nsys": "#4C72B0",
+    }
+    names = [r["name"] for r in rows]
+    overheads = [r["overhead_pct"] for r in rows]
+    rss = [r["rss_delta_mb"] for r in rows]
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.4))
+
+    ax = axes[0]
+    x = np.arange(len(names))
+    bars = ax.bar(
+        x,
+        overheads,
+        color=[colors.get(n, "#64748b") for n in names],
+        edgecolor="white",
+        width=0.72,
+    )
+    ax.set_xticks(x)
+    ax.set_xticklabels([labels.get(n, n) for n in names], fontsize=9)
+    ax.set_ylabel("step-time overhead vs baseline (%)")
+    ax.set_title("(a) Always-on step-time tax")
+    ax.axhline(0, color="#94a3b8", lw=0.8)
+    for bar, val in zip(bars, overheads, strict=False):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 2,
+            f"{val:+.1f}%",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+
+    ax = axes[1]
+    bars = ax.bar(
+        x,
+        rss,
+        color=[colors.get(n, "#64748b") for n in names],
+        edgecolor="white",
+        width=0.72,
+    )
+    ax.set_xticks(x)
+    ax.set_xticklabels([labels.get(n, n) for n in names], fontsize=9)
+    ax.set_ylabel("RSS growth over 200 steps (MB)")
+    ax.set_title("(b) Trace accumulation (RSS Δ)")
+    for bar, val in zip(bars, rss, strict=False):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + max(rss) * 0.02,
+            f"{val:.0f}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+
+    device = overhead.get("device", "")
+    steps = overhead.get("steps", "")
+    fig.suptitle(
+        f"Modal remasurement on {device} · launch-heavy MLP · {steps} steps",
+        fontsize=12,
+        y=1.02,
+    )
+    fig.tight_layout()
+    fig.savefig(out / "overhead_comparison.svg", bbox_inches="tight")
+    plt.close(fig)
+
+    # Step-time distributions for the main configs.
+    series = overhead.get("step_ms_by_config") or {}
+    want = ["baseline", "argus_semantics", "torch_profiler_cuda", "torch_profiler_full", "nsys"]
+    fig, ax = plt.subplots(figsize=(9.5, 4.4))
+    for name in want:
+        if name not in series or not series[name]:
+            continue
+        arr = np.asarray(series[name], dtype=np.float64)
+        ax.plot(
+            np.arange(1, len(arr) + 1),
+            arr,
+            label=labels.get(name, name).replace("\n", " "),
+            color=colors.get(name, "#64748b"),
+            lw=1.4,
+            alpha=0.9,
+        )
+    ax.set_xlabel("step")
+    ax.set_ylabel("step time (ms)")
+    ax.set_title("Per-step wall time under always-on profiling")
+    ax.legend(frameon=False, fontsize=9, ncol=2)
+    fig.tight_layout()
+    fig.savefig(out / "overhead_step_series.svg", bbox_inches="tight")
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--results", type=Path, default=Path("playground/argus_demo_results.json"))
+    parser.add_argument(
+        "--overhead",
+        type=Path,
+        default=Path("playground/argus_overhead_results.json"),
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
     results = json.loads(args.results.read_text()) if args.results.exists() else None
+    overhead = json.loads(args.overhead.read_text()) if args.overhead.exists() else None
 
     architecture_figure(args.out)
     progressive_diagnosis_figure(args.out)
@@ -195,9 +306,11 @@ def main() -> None:
         kde = results["kde_demo"]
         kde_cluster_figure(kde["durations_ms"], kde["clusters"], args.out)
         w1_matrix_figure(results, args.out)
-        print(f"Wrote figures to {args.out}")
-    else:
-        print(f"Wrote conceptual figures to {args.out} (no results at {args.results})")
+
+    if overhead:
+        overhead_figures(overhead, args.out)
+
+    print(f"Wrote figures to {args.out}")
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ cover:
 
 # Paper Reading: ARGUS — Always-On Tracing at 10,000+ GPU Scale
 
-What Tencent built to catch fail-slow training jobs on 10k+ GPU clusters with under 2% overhead — and a tiny Modal demo of the core compression + straggler detection idea.
+What Tencent built to catch fail-slow training jobs on 10k+ GPU clusters with under 2% overhead — plus Modal remasurements of always-on `torch.profiler` / `nsys` overhead and a tiny demo of the KDE + W₁ detection math.
 
 **Paper:** [ARGUS: Production-Scale Tracing and Performance Diagnosis for over 10,000-GPU Clusters](https://arxiv.org/abs/2606.20374) (Zhou et al., Tencent, arXiv 2606.20374, submitted to ATC 2026)
 
@@ -141,13 +141,45 @@ Why W₁ over KS or KL? Metric properties, sensitivity to both shift and tail in
 
 ## Evaluation Highlights (§8)
 
-On HunYuan-V3 Preview MoE training (8× and 32× GPU nodes):
+On HunYuan-V3 Preview MoE training (8× and 32× GPU nodes), the paper reports:
 
 - **ARGUS all-on:** < **2%** iteration-time overhead, **flat RSS** (streaming, no trace pile-up).
 - **`torch.profiler` always-on:** **20–44%** slowdown, RSS grows until **OOM**.
 - **nsys always-on:** training **breaks** (NaN at iter 10 on 8 GPU; hang on 32 GPU AllToAll).
 
 The comparison is intentionally harsh — always-on nsys/profiler is not their intended mode — but that is exactly the production gap ARGUS fills.
+
+### Our remasurement on Modal A10G
+
+Paper numbers are on HunYuan MoE multi-GPU jobs. To check whether the *always-on tax* is real on a workload we can reproduce, we ran a **launch-heavy** eager MLP (48× `Linear(512)` + GELU, BF16, 200 steps) under five configs on Modal **A10G**:
+
+Code: [`playground/argus_overhead_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/argus_overhead_modal.py)
+
+```bash
+uv run modal run playground/argus_overhead_modal.py
+```
+
+| Config | Median step | Overhead | RSS Δ (200 steps) |
+|---|---:|---:|---:|
+| baseline | 10.29 ms | — | ~0 MB |
+| ARGUS-style semantics (CUDA Events on fwd/bwd/opt) | 10.46 ms | **+1.6%** | ~0 MB |
+| `torch.profiler` CUDA only | 13.96 ms | **+35.7%** | **+214 MB** |
+| `torch.profiler` CPU+CUDA+shapes+stacks | 25.00 ms | **+143%** | **+2.98 GB** |
+| `nsys profile` always-on (`cuda,nvtx,osrt`) | 16.05 ms | **+56.0%** | +20 MB (+21 MB `.nsys-rep`) |
+
+Raw results: [argus_overhead_results.json](./argus_overhead_results.json)
+
+![Always-on profiler overhead and RSS growth on Modal A10G](./overhead_comparison.svg)
+
+![Per-step wall time series under each profiler](./overhead_step_series.svg)
+
+What this remasurement supports:
+
+1. **Semantics-only always-on is cheap** (~1.6%), in the same ballpark as ARGUS’s claimed phase instrumentation cost.
+2. **`torch.profiler` is not always-on-safe** once you ask for useful fidelity — CUDA-only already costs ~36% here and grows RSS; full CPU+stack mode more than doubles step time and piles up ~3 GB in 200 steps.
+3. **`nsys` always-on is also expensive** (~56% step-time tax on this single-GPU loop). We did **not** reproduce the paper’s multi-GPU hang/NaN — that failure mode is about distributed NCCL/AllToAll under nsys, which this microbench does not exercise.
+
+Caveat: this is **not** a full ARGUS CUPTI injector + streaming Processor. We only remasured the *competitor* always-on tax and an ARGUS-**style** semantics probe. The paper’s <2% combined figure still includes their engineered CUPTI path (pre-allocated buffers, async export, selective injection), which we do not reimplement.
 
 ## Case Studies — What Actually Breaks at Scale
 
@@ -219,7 +251,7 @@ uv run python playground/argus_demo_figures.py \
   --out content/posts/argus-tracing-at-10000-gpu-scale
 ```
 
-**Caveats:** this demo validates the **detection math**, not ARGUS end-to-end overhead. Real traces are noisier, multimodal clustering is load-bearing, and parallelism-group routing in L2 is doing real work the toy script skips.
+**Caveats:** the KDE/W₁ demo validates the **detection math**, not ARGUS end-to-end overhead — see the Modal remasurement above for profiler taxes. Real traces are noisier, multimodal clustering is load-bearing, and parallelism-group routing in L2 is doing real work the toy script skips.
 
 ## Comparison With Tools You May Already Use
 
@@ -228,8 +260,8 @@ uv run python playground/argus_demo_figures.py \
 | Grafana / DCGM metrics | yes | no | very low |
 | Greyhound / Holmes / C4 | yes | no | low |
 | MegaScale / EROICA | triggered / partial | partial | medium–high when deep |
-| nsys / torch.profiler | manual / short windows | yes (single job) | 5–30%+ |
-| **ARGUS** | **yes** | **yes (via compressed stats)** | **< 2%** |
+| nsys / torch.profiler | manual / short windows | yes (single job) | **our A10G:** nsys ~56%, profiler CUDA ~36% / full ~143% |
+| **ARGUS** | **yes** | **yes (via compressed stats)** | paper **< 2%**; our semantics probe **~1.6%** |
 
 For a single-machine workflow, stay with the [end-to-end profiling post](/posts/profiling-pytorch-training-end-to-end/). ARGUS is the answer when **every minute of a month-long 10k-GPU run** needs a watchdog that can still name the kernel.
 
