@@ -124,6 +124,26 @@ def _max_param_diff(model: nn.Module) -> float:
     return max(diffs) if diffs else 0.0
 
 
+def _max_named_buffer_diff(model: nn.Module) -> tuple[float, dict[str, float]]:
+    """Max abs diff of buffers (e.g. BN running stats) across ranks."""
+    backend = dist.get_backend()
+    device = next(model.parameters()).device
+    per_name: dict[str, float] = {}
+    worst = 0.0
+    for name, buf in model.named_buffers():
+        flat = buf.detach().float().reshape(-1)
+        flat = flat.to(device if backend == "nccl" else "cpu")
+        gathered = [torch.zeros_like(flat) for _ in range(dist.get_world_size())]
+        dist.all_gather(gathered, flat)
+        ref = gathered[0]
+        md = 0.0
+        for g in gathered[1:]:
+            md = max(md, float((g - ref).abs().max().item()))
+        per_name[name] = md
+        worst = max(worst, md)
+    return worst, per_name
+
+
 def _finite(x: float) -> bool:
     return bool(np.isfinite(x))
 
@@ -607,54 +627,178 @@ def case_loss_spike(rank: int, world_size: int, backend: str, port: int) -> dict
 
 
 def case_numerical_drift(rank: int, world_size: int, backend: str, port: int) -> dict:
-    """Silent desync: after warmup, rank 0 applies an extra local param update.
+    """Real silent-desync bugs (not toy param writes).
 
-    Loss can still look fine (training continues) while ranks diverge.
+    1. rank0_only_grad_clip — after DDP allreduces grads, only rank 0 clips
+       before ``optimizer.step()``. A common single-GPU leftover. Parameters diverge;
+       loss can still look fine.
+
+    2. bn_broadcast_buffers_false — ``BatchNorm`` + ``broadcast_buffers=False`` with
+       different per-rank batches. Affine weights stay synced via grad allreduce, but
+       ``running_mean`` / ``running_var`` silently drift (eval / checkpoint landmines).
     """
     _init_pg(rank, world_size, backend, port)
     device = _device(rank, backend)
     if device.type == "cuda":
         torch.cuda.set_device(device)
 
+    # --- Recipe 1: rank-0-only grad clip (true parameter drift) -----------------
     torch.manual_seed(0)
-    model = _mlp(48, 8).to(device)
-    ddp = _wrap_ddp(model, device)
-    opt = torch.optim.SGD(ddp.parameters(), lr=0.05)
-
-    onset = 10
-    losses: list[float] = []
-    max_diffs: list[float] = []
-    for step in range(30):
-        # Identical data across ranks so healthy run stays synced.
-        torch.manual_seed(1000 + step)
+    model_clip = _mlp(48, 8).to(device)
+    ddp_clip = _wrap_ddp(model_clip, device)
+    opt_clip = torch.optim.SGD(ddp_clip.parameters(), lr=0.05)
+    onset = 8
+    losses_clip: list[float] = []
+    param_diffs_clip: list[float] = []
+    for step in range(28):
+        # Realistic DDP: different microbatches per rank. Grads still match after allreduce.
+        torch.manual_seed(10_000 + step * 17 + rank * 101)
         x = torch.randn(24, 48, device=device)
         y = torch.randint(0, 8, (24,), device=device)
-        opt.zero_grad(set_to_none=True)
-        loss = F.cross_entropy(ddp(x), y)
+        opt_clip.zero_grad(set_to_none=True)
+        loss = F.cross_entropy(ddp_clip(x), y)
         loss.backward()
-        opt.step()
-
         if step >= onset and rank == 0:
-            # Bug: rank-0-only "EMA" / logging side-effect that mutates weights.
-            with torch.no_grad():
-                for p in model.parameters():
-                    p.add_(0.01)
+            # Bug: clip only on rank 0 after grads were already synced.
+            torch.nn.utils.clip_grad_norm_(model_clip.parameters(), max_norm=0.05)
+        opt_clip.step()
+        param_diffs_clip.append(_max_param_diff(model_clip))
+        losses_clip.append(float(loss.detach().cpu()))
 
-        md = _max_param_diff(model)
-        max_diffs.append(md)
-        losses.append(float(loss.detach().cpu()))
+    # Control: same setup but clip on every rank → params stay together.
+    torch.manual_seed(0)
+    model_ok = _mlp(48, 8).to(device)
+    ddp_ok = _wrap_ddp(model_ok, device)
+    opt_ok = torch.optim.SGD(ddp_ok.parameters(), lr=0.05)
+    param_diffs_ok: list[float] = []
+    for step in range(28):
+        torch.manual_seed(10_000 + step * 17 + rank * 101)
+        x = torch.randn(24, 48, device=device)
+        y = torch.randint(0, 8, (24,), device=device)
+        opt_ok.zero_grad(set_to_none=True)
+        loss = F.cross_entropy(ddp_ok(x), y)
+        loss.backward()
+        if step >= onset:
+            torch.nn.utils.clip_grad_norm_(model_ok.parameters(), max_norm=0.05)
+        opt_ok.step()
+        param_diffs_ok.append(_max_param_diff(model_ok))
+
+    # --- Recipe 2: BN running-stat drift with broadcast_buffers=False ------------
+    torch.manual_seed(0)
+    bn_model = nn.Sequential(
+        nn.Linear(48, 48),
+        nn.BatchNorm1d(48),
+        nn.GELU(),
+        nn.Linear(48, 8),
+    ).to(device)
+    if device.type == "cuda":
+        ddp_bn = nn.parallel.DistributedDataParallel(
+            bn_model, device_ids=[device.index], broadcast_buffers=False
+        )
+    else:
+        ddp_bn = nn.parallel.DistributedDataParallel(bn_model, broadcast_buffers=False)
+    opt_bn = torch.optim.SGD(ddp_bn.parameters(), lr=0.05)
+    param_diffs_bn: list[float] = []
+    buffer_diffs_bn: list[float] = []
+    buffer_names_final: dict[str, float] = {}
+    losses_bn: list[float] = []
+    for step in range(28):
+        torch.manual_seed(20_000 + step * 13 + rank * 99)
+        x = torch.randn(32, 48, device=device)
+        y = torch.randint(0, 8, (32,), device=device)
+        opt_bn.zero_grad(set_to_none=True)
+        loss = F.cross_entropy(ddp_bn(x), y)
+        loss.backward()
+        opt_bn.step()
+        param_diffs_bn.append(_max_param_diff(bn_model))
+        buf_max, buf_names = _max_named_buffer_diff(bn_model)
+        buffer_diffs_bn.append(buf_max)
+        buffer_names_final = buf_names
+        losses_bn.append(float(loss.detach().cpu()))
+
+    # After training: one eval forward. broadcast_buffers=True re-syncs from rank0
+    # and eval does not update running stats → buffers match. False keeps drift.
+    ddp_bn.eval()
+    with torch.no_grad():
+        _ = ddp_bn(torch.randn(8, 48, device=device))
+    bn_eval_buf_diff, buffer_names_final = _max_named_buffer_diff(bn_model)
+    bn_eval_param_diff = _max_param_diff(bn_model)
+
+    # Control: broadcast_buffers=True (DDP default) keeps BN stats aligned at eval.
+    torch.manual_seed(0)
+    bn_ok = nn.Sequential(
+        nn.Linear(48, 48),
+        nn.BatchNorm1d(48),
+        nn.GELU(),
+        nn.Linear(48, 8),
+    ).to(device)
+    ddp_bn_ok = _wrap_ddp(bn_ok, device)  # default broadcast_buffers=True
+    opt_bn_ok = torch.optim.SGD(ddp_bn_ok.parameters(), lr=0.05)
+    buffer_diffs_ok: list[float] = []
+    for step in range(28):
+        torch.manual_seed(20_000 + step * 13 + rank * 99)
+        x = torch.randn(32, 48, device=device)
+        y = torch.randint(0, 8, (32,), device=device)
+        opt_bn_ok.zero_grad(set_to_none=True)
+        loss = F.cross_entropy(ddp_bn_ok(x), y)
+        loss.backward()
+        opt_bn_ok.step()
+        buffer_diffs_ok.append(_max_named_buffer_diff(bn_ok)[0])
+    ddp_bn_ok.eval()
+    with torch.no_grad():
+        _ = ddp_bn_ok(torch.randn(8, 48, device=device))
+    bn_ok_eval_buf_diff = _max_named_buffer_diff(bn_ok)[0]
+
+    recipes = [
+        {
+            "name": "rank0_only_grad_clip",
+            "triggered": param_diffs_clip[-1] > 1e-3,
+            "where": "parameters",
+            "detail": (
+                f"after onset, only rank0 clips → final max|Δparam|={param_diffs_clip[-1]:.3e} "
+                f"(control all-rank clip={param_diffs_ok[-1]:.3e})"
+            ),
+            "fix": "clip grads on every rank (or inside a synced utility); never gate clip on rank",
+        },
+        {
+            "name": "bn_broadcast_buffers_false",
+            "triggered": bn_eval_buf_diff > 1e-3 and bn_ok_eval_buf_diff <= 1e-3,
+            "where": "buffers",
+            "detail": (
+                f"after eval forward: broken max|Δbuf|={bn_eval_buf_diff:.3e} "
+                f"(params still synced={bn_eval_param_diff:.3e}); "
+                f"broadcast_buffers=True control={bn_ok_eval_buf_diff:.3e}"
+            ),
+            "fix": "keep broadcast_buffers=True or use SyncBatchNorm; checksum buffers at eval",
+            "buffer_names": buffer_names_final,
+        },
+    ]
 
     out = {
         "case": "numerical_drift",
         "rank": rank,
         "backend": backend,
         "onset_step": onset,
-        "losses": losses,
-        "max_param_diff": max_diffs,
-        "final_max_param_diff": max_diffs[-1],
-        "drift_detected": max_diffs[-1] > 1e-3,
-        "loss_still_finite": all(_finite(v) for v in losses),
-        "fix": "periodically allgather/checksum weights; forbid rank-local param writes",
+        "recipes": recipes,
+        "n_recipes": len(recipes),
+        "n_triggered": sum(1 for r in recipes if r["triggered"]),
+        "triggered_names": [r["name"] for r in recipes if r["triggered"]],
+        # Primary series for figures: real param-divergence bug.
+        "losses": losses_clip,
+        "max_param_diff": param_diffs_clip,
+        "max_param_diff_control": param_diffs_ok,
+        "final_max_param_diff": param_diffs_clip[-1],
+        "control_final_max_param_diff": param_diffs_ok[-1],
+        "bn_losses": losses_bn,
+        "bn_max_param_diff": param_diffs_bn,
+        "bn_max_buffer_diff": buffer_diffs_bn,
+        "bn_max_buffer_diff_control": buffer_diffs_ok,
+        "bn_final_max_buffer_diff": bn_eval_buf_diff,
+        "bn_final_max_param_diff": bn_eval_param_diff,
+        "bn_control_eval_buffer_diff": bn_ok_eval_buf_diff,
+        "drift_detected": param_diffs_clip[-1] > 1e-3 and bn_eval_buf_diff > 1e-3,
+        "loss_still_finite": all(_finite(v) for v in losses_clip + losses_bn),
+        "fix": "checksum params AND buffers; never rank-gate clip / BN broadcast",
     }
     dist.destroy_process_group()
     return out
@@ -1121,6 +1265,9 @@ def run_case(
             "n_triggered",
             "triggered_names",
             "n_recipes",
+            "bn_final_max_buffer_diff",
+            "bn_final_max_param_diff",
+            "control_final_max_param_diff",
             "detected",
             "drift_detected",
             "leak_detected",
@@ -1219,9 +1366,12 @@ def _print_summary(results: dict) -> None:
             print(f"  loss_spike: detected={p.get('detected')} ratios={p.get('spike_ratio_vs_median')}")
         elif name == "numerical_drift":
             diff = p.get("final_max_param_diff")
+            buf = p.get("bn_final_max_buffer_diff")
             print(
                 f"  drift: detected={p.get('drift_detected')} "
-                f"final_diff={diff if diff is None else f'{diff:.3e}'}"
+                f"recipes={p.get('triggered_names')} "
+                f"param_diff={diff if diff is None else f'{diff:.3e}'} "
+                f"bn_buf_diff={buf if buf is None else f'{buf:.3e}'}"
             )
         elif name == "memory_leak":
             growth = p.get("growth_mb")

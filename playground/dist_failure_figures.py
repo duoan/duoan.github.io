@@ -64,7 +64,7 @@ def taxonomy_figure(out: Path) -> None:
             [
                 ("NaN / Inf", "11-recipe catalog"),
                 ("Loss spikes", "corrupt batch / outlier"),
-                ("Silent drift", "rank-local weight writes"),
+                ("Silent drift", "rank0-only clip / BN buffers"),
             ],
             "#dbeafe",
             C_BLUE,
@@ -218,22 +218,47 @@ def drift_and_leak_figure(results: dict, out: Path) -> None:
     drift = _primary(results, "numerical_drift")
     leak = _primary(results, "memory_leak")
 
-    fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.0))
+    fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.2))
 
     ax = axes[0]
-    diffs = np.asarray(drift["max_param_diff"], dtype=np.float64)
-    losses = np.asarray(drift["losses"], dtype=np.float64)
-    steps = np.arange(len(diffs))
-    ax.semilogy(steps, np.maximum(diffs, 1e-12), color=C_RED, lw=2, label="max |Δparam| across ranks")
-    ax.axvline(drift["onset_step"], color=C_AMBER, ls="--", label="rank-0 local write starts")
+    steps = np.arange(len(drift["max_param_diff"]))
+    ax.semilogy(
+        steps,
+        np.maximum(np.asarray(drift["max_param_diff"], dtype=np.float64), 1e-12),
+        color=C_RED,
+        lw=2,
+        label="rank0-only grad clip",
+    )
+    if "max_param_diff_control" in drift:
+        ax.semilogy(
+            steps,
+            np.maximum(np.asarray(drift["max_param_diff_control"], dtype=np.float64), 1e-12),
+            color=C_GREEN,
+            lw=1.8,
+            label="clip on all ranks",
+        )
+    if "bn_max_buffer_diff" in drift:
+        ax.semilogy(
+            np.arange(len(drift["bn_max_buffer_diff"])),
+            np.maximum(np.asarray(drift["bn_max_buffer_diff"], dtype=np.float64), 1e-12),
+            color=C_AMBER,
+            lw=2,
+            ls="--",
+            label="BN buffers (broadcast_buffers=False)",
+        )
+        if "bn_max_param_diff" in drift:
+            ax.semilogy(
+                np.arange(len(drift["bn_max_param_diff"])),
+                np.maximum(np.asarray(drift["bn_max_param_diff"], dtype=np.float64), 1e-12),
+                color=C_SLATE,
+                lw=1.4,
+                label="BN affine params (still synced)",
+            )
+    ax.axvline(drift["onset_step"], color=C_PURPLE, ls=":", label="clip onset")
     ax.set_xlabel("step")
-    ax.set_ylabel("max param diff")
-    ax.set_title("(a) Silent numerical drift")
-    ax2 = ax.twinx()
-    ax2.plot(steps, losses, color=C_SLATE, alpha=0.5, lw=1.2, label="loss (still finite)")
-    ax2.set_ylabel("loss")
-    ax2.spines.top.set_visible(False)
-    ax.legend(frameon=False, fontsize=8, loc="upper left")
+    ax.set_ylabel("max |Δ| across ranks")
+    ax.set_title("(a) Real silent drift: clip / BN buffers")
+    ax.legend(frameon=False, fontsize=7.5, loc="best")
 
     ax = axes[1]
     leaky = np.asarray(leak["allocated_mb_leaky"], dtype=np.float64)

@@ -24,7 +24,7 @@ I built a small lab that injects each failure on purpose and measures the debug 
 |---|---|---|
 | NaN (11 recipes) | AMP overflow, bad LR, corrupt data, masks, Adam poison, DDP contagion, … | **11/11** triggered |
 | Loss spike | corrupt batch ×`1e3` at steps 12, 27 | spikes **59–106×** median |
-| Silent drift | rank-0-only param write after step 10 | max \|Δparam\| → **0.20** while loss stays finite |
+| Silent drift | rank0-only `clip_grad` after allreduce; BN `broadcast_buffers=False` | params **and** BN buffers diverge; loss stays finite |
 | Memory leak | retain activations every step | +**5.1 MB** CUDA alloc (fixed path flat) |
 | Straggler | rank 1 delays 120 ms before allreduce | collective wait **0.1 → 120 ms** (~**1377×**) |
 | Bad node | rank 0 extra local matmuls | local timer **~2400×** vs fastest peer |
@@ -158,26 +158,37 @@ NaN is not one bug. The lab runs an **11-recipe catalog** of the failures that s
 
 ## 3. Silent Numerical Drift
 
-**Symptom:** loss still decreases, checkpoints “train”, but ranks disagree on weights. Eval disagrees with train. Restarting from a checkpoint on different world size changes results.
+**Symptom:** loss still decreases, checkpoints “train”, but ranks disagree on weights **or** BatchNorm running stats. Eval disagrees with train. Restarting from a checkpoint on a different world size changes results.
 
-**Inject:** after step 10, **rank 0 only** does `p.add_(0.01)` on every parameter (stand-in for rank-local EMA, logging side-effect, or “debug edit”).
+Toy `param.add_` mocks are not useful here. The lab injects two bugs that show up in real DDP code review:
+
+| Recipe | Real pattern | What diverges |
+|---|---|---|
+| `rank0_only_grad_clip` | Single-GPU leftover: `if rank == 0: clip_grad_norm_(...)` **after** DDP already allreduced grads | **Parameters** — ranks take different `optimizer.step()` updates |
+| `bn_broadcast_buffers_false` | `DistributedDataParallel(..., broadcast_buffers=False)` with ordinary `BatchNorm` and different per-rank batches | **BN `running_mean` / `running_var`** — affine weights stay synced via grad allreduce |
 
 ![Drift and memory leak](./drift_and_memory_leak.svg)
 
-**Lab result:** max abs param diff across ranks grows to **0.20**; **all losses remain finite**. This is the scary one — dashboards stay green.
+**Why the clip bug is real:** after `backward()`, DDP has already made every rank’s `.grad` identical. Clipping only on rank 0 then means rank 0 steps with a different grad tensor than ranks 1…N-1. No `add_` required — the optimizer does the divergence for you.
+
+**Why the BN bug is real:** `broadcast_buffers=False` is a documented DDP knob people flip for speed or for “I sync manually”. With independent shards, each rank’s BN running stats walk away. Training loss can look healthy because the training path uses batch stats; eval / EMA / resume is where you notice.
+
+**Lab result (Modal 2×A10G):** both recipes trigger; loss stays finite.
+- `rank0_only_grad_clip`: max \|Δparam\| → **1.3×10⁻²** (all-rank clip control stays **0**)
+- `bn_broadcast_buffers_false`: after eval forward, max \|Δbuffer\| → **7.4×10⁻²** while params stay synced; `broadcast_buffers=True` control → **0**
 
 ### Debug checklist
 
-1. Periodically `all_gather` a weight checksum / max abs diff (cheap: one float per param or a hash of flattened buckets).
-2. Diff rank-0 vs rank-k after N steps; anything ≫ `1e-5` in FP32 DDP is a bug.
-3. Search for rank-branched code that writes parameters, buffers, or RNG state.
-4. Watch BatchNorm: prefer SyncBN / freeze BN when stats diverge across shards.
+1. Periodically `all_gather` a **parameter** checksum *and* a **buffer** checksum (BN running stats are the usual landmine).
+2. Diff rank-0 vs rank-k after N steps; param diffs ≫ `1e-5` in FP32 DDP means a rank-gated update (clip, WD, EMA copy-back, manual `step`).
+3. Grep for `if rank == 0` / `if is_main` around `clip_grad`, `optimizer.step`, `load_state_dict`, EMA.
+4. Confirm DDP `broadcast_buffers` and whether you meant `SyncBatchNorm`.
 
 ### Fix patterns
 
-- **No rank-local parameter writes.** EMA/buffers must be broadcast or computed identically.
-- Broadcast buffers from rank 0 when intentionally asymmetric.
-- Deterministic smoke test: identical synthetic batch on all ranks → diff must stay ~0.
+- Grad clip / AMP unscale / optimizer step: **same control flow on every rank**.
+- Keep `broadcast_buffers=True` or use **SyncBatchNorm**; if you disable broadcast, you must sync BN stats yourself.
+- Smoke test: after K steps, assert `max|Δparam|` and `max|Δbuffer|` across ranks are ~0.
 
 ---
 
@@ -305,7 +316,7 @@ NaN is not one bug. The lab runs an **11-recipe catalog** of the failures that s
 |---|---|---|---|
 | `nan`/`inf` loss | which recipe class + first rank | Numerics catalog | scaler / data / mask / skip Adam step |
 | rare loss explosions | batch stats on spike steps | Data | quarantine outliers |
-| fine loss, bad eval / restart drift | weight checksum across ranks | Silent drift | ban rank-local param writes |
+| fine loss, bad eval / restart drift | checksum params **and** BN buffers | Silent drift | never rank-gate clip; broadcast BN / SyncBN |
 | climbing RSS / CUDA alloc | memory curve per N steps | Leak | stop retaining tensors |
 | all ranks slow after a collective | local vs wait timers | Straggler | remove asymmetric host work |
 | same rank always slow | local timer vs peers + DCGM | Bad node | cordon node |
