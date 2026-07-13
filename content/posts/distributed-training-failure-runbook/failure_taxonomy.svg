@@ -6,7 +6,7 @@
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
     <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
-    <dc:date>2026-07-13T05:36:04.142829</dc:date>
+    <dc:date>2026-07-13T06:06:08.020693</dc:date>
     <dc:format>image/svg+xml</dc:format>
     <dc:creator>
      <cc:Agent>
@@ -35,7 +35,7 @@ L 241.5168 273.102
 L 241.5168 83.172 
 L 29.1672 83.172 
 z
-" clip-path="url(#p16c5bf1a77)" style="fill: #dbeafe; stroke: #2563eb; stroke-width: 1.5; stroke-linejoin: miter"/>
+" clip-path="url(#pbcfc66b6c8)" style="fill: #dbeafe; stroke: #2563eb; stroke-width: 1.5; stroke-linejoin: miter"/>
    </g>
    <g id="patch_3">
     <path d="M 263.484 223.428 
@@ -43,7 +43,7 @@ L 475.8336 223.428
 L 475.8336 83.172 
 L 263.484 83.172 
 z
-" clip-path="url(#p16c5bf1a77)" style="fill: #ffedd5; stroke: #d97706; stroke-width: 1.5; stroke-linejoin: miter"/>
+" clip-path="url(#pbcfc66b6c8)" style="fill: #ffedd5; stroke: #d97706; stroke-width: 1.5; stroke-linejoin: miter"/>
    </g>
    <g id="patch_4">
     <path d="M 497.8008 273.102 
@@ -51,7 +51,7 @@ L 710.1504 273.102
 L 710.1504 83.172 
 L 497.8008 83.172 
 z
-" clip-path="url(#p16c5bf1a77)" style="fill: #fee2e2; stroke: #dc2626; stroke-width: 1.5; stroke-linejoin: miter"/>
+" clip-path="url(#pbcfc66b6c8)" style="fill: #fee2e2; stroke: #dc2626; stroke-width: 1.5; stroke-linejoin: miter"/>
    </g>
    <g id="text_1">
     <text style="font-size: 14px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f172a" x="373.32" y="30.576" transform="rotate(-0 373.32 30.576)">Distributed training failure taxonomy</text>
@@ -60,22 +60,22 @@ z
     <text style="font-weight: 700; font-size: 12px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2563eb" x="135.342" y="101.130375" transform="rotate(-0 135.342 101.130375)">Numerics</text>
    </g>
    <g id="text_3">
-    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="40.1508" y="144.534" transform="rotate(-0 40.1508 144.534)">NaN / Inf</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="40.1508" y="144.534" transform="rotate(-0 40.1508 144.534)">Silent drift</text>
    </g>
    <g id="text_4">
-    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="40.1508" y="163.2348" transform="rotate(-0 40.1508 163.2348)">11-recipe catalog</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="40.1508" y="163.2348" transform="rotate(-0 40.1508 163.2348)">rank0 clip / EMA copy-back</text>
    </g>
    <g id="text_5">
     <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="40.1508" y="194.208" transform="rotate(-0 40.1508 194.208)">Loss spikes</text>
    </g>
    <g id="text_6">
-    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="40.1508" y="212.9088" transform="rotate(-0 40.1508 212.9088)">corrupt batch / outlier</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="40.1508" y="212.9088" transform="rotate(-0 40.1508 212.9088)">z-loss / aux weight typo</text>
    </g>
    <g id="text_7">
-    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="40.1508" y="243.882" transform="rotate(-0 40.1508 243.882)">Silent drift</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="40.1508" y="243.882" transform="rotate(-0 40.1508 243.882)">NaN / Inf</text>
    </g>
    <g id="text_8">
-    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="40.1508" y="262.5828" transform="rotate(-0 40.1508 262.5828)">rank0-only clip / BN buffers</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="40.1508" y="262.5828" transform="rotate(-0 40.1508 262.5828)">attn/mask/AMP/Adam/DDP</text>
    </g>
    <g id="text_9">
     <text style="font-weight: 700; font-size: 12px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #d97706" x="369.6588" y="101.130375" transform="rotate(-0 369.6588 101.130375)">Resources</text>
@@ -116,7 +116,7 @@ z
   </g>
  </g>
  <defs>
-  <clipPath id="p16c5bf1a77">
+  <clipPath id="pbcfc66b6c8">
    <rect x="7.2" y="7.2" width="732.24" height="350.64"/>
   </clipPath>
  </defs>

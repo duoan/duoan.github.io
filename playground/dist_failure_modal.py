@@ -481,69 +481,93 @@ def _recipe_empty_valid_tokens(device: torch.device) -> dict:
 
 
 def _recipe_adam_moment_poison(device: torch.device) -> dict:
-    """Nonfinite grads from AMP-without-scaler permanently poison Adam moments."""
+    """Nonfinite grads stepped into Adam permanently poison moments / weights.
+
+    Overflow comes from the same AMP-without-scaler path as ``amp_no_scaler``;
+    the distinct bug is continuing into AdamW without an isfinite guard.
+    """
     torch.manual_seed(0)
-    # Reuse the same overflow class as amp_no_scaler, then step Adam anyway.
     model = TinyTransformerLM().to(device)
-    opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    first = None
-    for step in range(80):
-        ids, labels, mask = _make_batch(8, 96, device, seed=20 + step)
-        opt.zero_grad(set_to_none=True)
+    # Drive overflow with SGD+AMP (Adam itself often stays finite longer).
+    sgd = torch.optim.SGD(model.parameters(), lr=2.0)
+    overflow_step = None
+    for step in range(60):
+        ids, labels, mask = _make_batch(8, 96, device, seed=100 + step)
+        sgd.zero_grad(set_to_none=True)
         if device.type == "cuda":
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                 loss = _lm_loss(model(ids, key_padding_mask=mask), labels)
         else:
-            # CPU proxy: fp16 weights + large LR (same overflow class).
-            if step == 0:
-                model = TinyTransformerLM().to(device).half()
-                opt = torch.optim.AdamW(model.parameters(), lr=1.0)
+            model_h = model.half() if step == 0 else model
+            model = model_h
+            sgd = torch.optim.SGD(model.parameters(), lr=1.0)
             loss = _lm_loss(model(ids, key_padding_mask=mask).float(), labels)
-        finite_loss = bool(torch.isfinite(loss))
-        if finite_loss:
-            loss.backward()
-        else:
-            # Loss already nonfinite — still attempt backward when the graph allows.
+        if not torch.isfinite(loss):
+            overflow_step = step
             with contextlib.suppress(Exception):
                 loss.backward()
-        grads_bad = any(
-            p.grad is not None and not torch.isfinite(p.grad).all() for p in model.parameters()
-        )
-        if (not finite_loss) or grads_bad:
-            # THE bug: no isfinite guard before AdamW.step().
+            break
+        loss.backward()
+        if any(p.grad is not None and not torch.isfinite(p.grad).all() for p in model.parameters()):
+            overflow_step = step
+            break
+        sgd.step()
+        if any(not torch.isfinite(p).all() for p in model.parameters()):
+            overflow_step = step
+            break
+
+    if overflow_step is None:
+        return _nan_ok("adam_moment_poison", "never produced nonfinite grads", "skip nonfinite steps")
+
+    # THE bug: hand existing nonfinite grads to Adam and step anyway.
+    # Do NOT zero_grad first — that would erase the overflow grads.
+    had_grads = any(p.grad is not None for p in model.parameters())
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    if had_grads:
+        with contextlib.suppress(Exception):
+            opt.step()
+    else:
+        ids, labels, mask = _make_batch(8, 96, device, seed=200)
+        try:
+            if device.type == "cuda":
+                with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                    loss = _lm_loss(model(ids, key_padding_mask=mask), labels)
+            else:
+                loss = _lm_loss(model(ids, key_padding_mask=mask).float(), labels)
+            with contextlib.suppress(Exception):
+                loss.backward()
             with contextlib.suppress(Exception):
                 opt.step()
-            first = step
-            break
-        opt.step()
-
-    if first is None:
-        return _nan_ok("adam_moment_poison", "never produced nonfinite grads", "skip nonfinite steps")
+        except Exception:  # noqa: BLE001
+            pass
 
     moment_nan = any(
         (k in st and not torch.isfinite(st[k]).all())
         for st in opt.state.values()
         for k in ("exp_avg", "exp_avg_sq")
     )
+    param_nan = any(not torch.isfinite(p).all() for p in model.parameters())
+    # One more Adam step — poisoned moments keep emitting NaNs.
     opt.zero_grad(set_to_none=True)
-    ids, labels, mask = _make_batch(4, 64, device, seed=99)
+    ids, labels, mask = _make_batch(4, 32, device, seed=202)
     try:
-        loss2 = _lm_loss(model(ids, key_padding_mask=mask).float(), labels)
+        loss2 = _lm_loss(model(ids, key_padding_mask=mask), labels)
+        if torch.isfinite(loss2):
+            loss2.backward()
+            opt.step()
+            param_nan = param_nan or any(not torch.isfinite(p).all() for p in model.parameters())
     except Exception:  # noqa: BLE001
         loss2 = torch.tensor(float("nan"))
-    if torch.isfinite(loss2):
-        loss2.backward()
-        with contextlib.suppress(Exception):
-            opt.step()
-    param_nan = any(not torch.isfinite(p.float()).all() for p in model.parameters())
+        param_nan = True
+
     if moment_nan or param_nan or not torch.isfinite(loss2):
         return _nan_hit(
             "adam_moment_poison",
             "optimizer_state",
-            f"AMP overflow stepped into Adam at step {first}; "
+            f"AMP overflow at step {overflow_step} stepped into Adam; "
             f"moment_nan={moment_nan} param_nan={param_nan}",
             "skip optimizer.step on nonfinite grads; reset Adam state after an incident",
-            first_step=first,
+            first_step=overflow_step,
         )
     return _nan_ok("adam_moment_poison", "Adam absorbed nonfinite without poison", "skip nonfinite steps")
 
@@ -1046,13 +1070,15 @@ def case_bad_node(rank: int, world_size: int, backend: str, port: int) -> dict:
         t_host0 = time.perf_counter()
         rng = np.random.default_rng(step + rank * 100)
         # Simulate byte-level encode + n-gram stats over a long document.
-        n_docs = 64 if rank == bad else 2
-        doc = rng.integers(1, VOCAB, size=(n_docs, 2048), dtype=np.int64)
+        n_docs = 256 if rank == bad else 2
+        doc = rng.integers(1, VOCAB, size=(n_docs, 4096), dtype=np.int64)
         # Cheap but real host work: histogram + rolling hash mix.
         hist = np.zeros(VOCAB, dtype=np.int64)
         for row in doc:
             hist += np.bincount(row, minlength=VOCAB)
             _ = int(row.astype(np.uint64).sum() * 2654435761 & 0xFFFFFFFF)
+            # Extra CPU pressure: bigram co-occurrence sketch.
+            _ = np.bincount((row[:-1] * VOCAB + row[1:]) % 4096, minlength=4096)
         ids, labels, mask = _make_batch(4, 32, device, seed=7000 + step + rank)
         t_host1 = time.perf_counter()
 
@@ -1076,7 +1102,7 @@ def case_bad_node(rank: int, world_size: int, backend: str, port: int) -> dict:
     means = [float(t.item()) for t in gathered]
     healthy = float(min(means)) if means else 0.0
     ratios = [m / max(healthy, 1e-9) for m in means]
-    flagged = [i for i, r in enumerate(ratios) if r >= 5.0]
+    flagged = [i for i, r in enumerate(ratios) if r >= 3.0]
 
     out = {
         "case": "bad_node",

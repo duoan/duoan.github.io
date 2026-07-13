@@ -212,7 +212,7 @@ Measure **forward time before backward** (local compute) **and** tokens/step. St
 
 True HBM/thermal faults need DCGM/Xid. What we **can** reproduce on Modal is the other common “bad node” shape in multimodal / tokenization-heavy jobs: **one rank’s host path is permanently expensive**, GPU kernels look fine, pre-collective local timers scream.
 
-**Lab:** rank 0 does heavy host tokenize/histogram work every step; peer does minimal work → local timer ratio flags rank 0.
+**Lab:** rank 0 does heavy host tokenize/histogram work every step; peer does minimal work → host timer ratio ~**20×** flags rank 0.
 
 ### Debug / fix
 
