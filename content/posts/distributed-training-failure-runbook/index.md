@@ -12,7 +12,7 @@ cover:
 
 # Distributed Training Failure Runbook: Reproducing the Failures That Actually Bite
 
-Eight reproducible failure modes — NaNs, loss spikes, silent drift, memory leaks, stragglers, bad nodes, collective hangs, and throughput cliffs — plus a triage runbook you can actually run.
+Eight reproducible failure modes — a **11-recipe NaN catalog**, loss spikes, silent drift, memory leaks, stragglers, bad nodes, collective hangs, and throughput cliffs — plus a triage runbook you can actually run.
 
 ## TL;DR
 
@@ -22,7 +22,7 @@ I built a small lab that injects each failure on purpose and measures the debug 
 
 | Failure | Injected bug | What we measured |
 |---|---|---|
-| NaN | FP16 weights + LR=`50`, no scaler | first non-finite loss at **step 2** |
+| NaN (11 recipes) | AMP overflow, bad LR, corrupt data, masks, Adam poison, DDP contagion, … | **11/11** triggered |
 | Loss spike | corrupt batch ×`1e3` at steps 12, 27 | spike **52–68×** median |
 | Silent drift | rank-0-only param write after step 10 | max \|Δparam\| → **0.20** while loss stays finite |
 | Memory leak | retain activations every step | +**5.1 MB** retained (monotonic) |
@@ -91,28 +91,44 @@ If you cannot answer “which rank, which step, which signal”, you are not deb
 
 ## 1. NaNs
 
-**Symptom:** loss becomes `nan`/`inf`; sometimes only after many steps; sometimes only on some ranks (then DDP spreads it).
+**Symptom:** loss / grads / optimizer state become `nan`/`inf`. Sometimes only after many steps; sometimes only on one rank (then DDP spreads it).
 
-**Inject:** FP16 parameters + absurd LR, no GradScaler.
+NaN is not one bug. The lab runs an **11-recipe catalog** of the failures that show up most often in training code review and war rooms:
 
-**Healthy control:** FP32 master weights + grad clip (or AMP + GradScaler on CUDA).
+| Recipe | What we inject | Where it breaks | Fix sketch |
+|---|---|---|---|
+| `fp16_overflow` | FP16 weights + LR=`50`, no GradScaler | loss @ step 2 | FP32 master + GradScaler / lower LR |
+| `huge_lr_fp32` | FP32 + LR=`1e3` | loss @ step 3 | warmup / sane LR — not an AMP-only problem |
+| `nan_in_inputs` | `batch[0,0]=NaN` | loss immediately | `isfinite` in dataloader; quarantine shards |
+| `fp16_matmul_overflow` | large FP16 GEMM | activations → Inf | loss scaling / BF16 / lower activation scale |
+| `attention_softmax_nan` | fully-masked softmax row (and FP16 score path) | softmax | never fully-mask a row; scale `1/sqrt(d)` |
+| `masked_nll_zero_neg_inf` | `0 * (-inf)` in hand-rolled NLL | loss | `ignore_index` / masked select; not `mask * log_p` |
+| `div_by_zero_normalize` | `sum / count` with `count=0` | loss → ±Inf | clamp denominator; skip empty shards |
+| `log_of_zero` | `log(prob)` with `prob=0` | loss → `-inf` | `log(clamp(p))` or logits APIs (`BCEWithLogits`) |
+| `soft_label_vs_neg_inf_logit` | soft label mass on `-inf` logit | loss | forbid `-inf` under soft labels |
+| `adam_moment_poison` | one NaN grad into Adam | optimizer state | skip `step` on non-finite grads; reset state |
+| `ddp_nan_contagion` | rank-0 param NaN → allreduce | grads on **all** ranks | per-rank `isfinite` before step |
 
-![NaN and loss spike](./nan_and_loss_spike.svg)
+![NaN recipe catalog](./nan_catalog.svg)
 
-**Lab result:** broken run hits non-finite loss at **step 2**; healthy control stays finite for 40 steps.
+**Lab result:** **11/11** recipes triggered. Healthy control (FP32 + mild LR + grad clip) stays finite.
+
+![NaN catalog strip and loss spikes](./nan_and_loss_spike.svg)
 
 ### Debug checklist
 
-1. Assert `torch.isfinite(loss)` and `isfinite` on grads **before** `optimizer.step()`.
-2. Check first occurrence rank (`all_reduce` of a “has_nan” flag).
-3. Bisect: disable AMP → lower LR → add grad clip → enable GradScaler.
-4. Inspect input norms / label ids (garbage in → Inf logits).
+1. Assert `torch.isfinite(loss)` **and** grads **before** `optimizer.step()` (Adam will remember a single NaN forever).
+2. `all_reduce` a per-rank `has_nan` flag — find the **first** offender before contagion.
+3. Bisect class: data (`isfinite(batch)`) → logits/softmax → loss reduction → optimizer state → AMP/LR.
+4. For attention / custom CE: look for **fully masked rows** and `0 * -inf` reductions.
+5. After an incident, **reset Adam moments** (or restore from a clean checkpoint).
 
 ### Fix patterns
 
-- Keep **FP32 master weights**; use autocast for compute.
-- `GradScaler` on CUDA AMP; skip non-finite scaler updates.
-- Grad clip (`clip_grad_norm_`) as a seatbelt, not a root-cause fix.
+- Prefer **logits APIs** (`cross_entropy`, `BCEWithLogitsLoss`) over `log(softmax(…))`.
+- Keep **FP32 master weights**; use autocast + GradScaler on CUDA.
+- Clamp denominators; never reduce over an empty valid set.
+- Grad clip is a seatbelt, not a root-cause fix.
 
 ---
 
@@ -286,7 +302,7 @@ If you cannot answer “which rank, which step, which signal”, you are not deb
 
 | If you see… | First probe | Likely class | First fix to try |
 |---|---|---|---|
-| `nan`/`inf` loss | which step/rank + input norms | Numerics | scaler / LR / clip / data sanitize |
+| `nan`/`inf` loss | which recipe class + first rank | Numerics catalog | scaler / data / mask / skip Adam step |
 | rare loss explosions | batch stats on spike steps | Data | quarantine outliers |
 | fine loss, bad eval / restart drift | weight checksum across ranks | Silent drift | ban rank-local param writes |
 | climbing RSS / CUDA alloc | memory curve per N steps | Leak | stop retaining tensors |

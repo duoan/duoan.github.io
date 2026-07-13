@@ -62,7 +62,7 @@ def taxonomy_figure(out: Path) -> None:
             0.3,
             4.2,
             [
-                ("NaN / Inf", "overflow, bad LR, no scaler"),
+                ("NaN / Inf", "11-recipe catalog"),
                 ("Loss spikes", "corrupt batch / outlier"),
                 ("Silent drift", "rank-local weight writes"),
             ],
@@ -111,30 +111,85 @@ def taxonomy_figure(out: Path) -> None:
     plt.close(fig)
 
 
-def nan_and_spike_figure(results: dict, out: Path) -> None:
+def nan_catalog_figure(results: dict, out: Path) -> None:
     nan = _primary(results, "nan")
-    spike = _primary(results, "loss_spike")
+    recipes = nan["recipes"]
+    # Stable display order.
+    labels = [r["name"] for r in recipes]
+    where_colors = {
+        "loss": C_RED,
+        "grad": C_AMBER,
+        "activation": C_PURPLE,
+        "softmax": "#0891b2",
+        "optimizer_state": "#be185d",
+        "param": C_SLATE,
+    }
 
-    fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.0))
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 5.0), gridspec_kw={"width_ratios": [1.35, 1.0]})
 
     ax = axes[0]
+    y = np.arange(len(recipes))
+    colors = [where_colors.get(r.get("where") or "", C_SLATE) for r in recipes]
+    ax.barh(y, [1 if r["triggered"] else 0 for r in recipes], color=colors, height=0.7)
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels, fontsize=9)
+    ax.set_xlim(0, 1.15)
+    ax.set_xticks([0, 1])
+    ax.set_xticklabels(["miss", "triggered"])
+    ax.invert_yaxis()
+    ax.set_title(f"(a) NaN catalog — {nan['n_triggered']}/{nan['n_recipes']} triggered")
+    for i, r in enumerate(recipes):
+        tag = r.get("where") or "—"
+        ax.text(1.02, i, tag, va="center", fontsize=8, color=colors[i])
+
+    # Legend for where
+    handles = [
+        plt.Line2D([0], [0], marker="s", color="w", markerfacecolor=c, markersize=10, label=k)
+        for k, c in where_colors.items()
+        if any(r.get("where") == k for r in recipes)
+    ]
+    ax.legend(handles=handles, frameon=False, fontsize=8, loc="lower right", title="where")
+
+    ax = axes[1]
     broken = np.asarray(nan["broken_losses"], dtype=np.float64)
     healthy = np.asarray(nan["healthy_losses"], dtype=np.float64)
-    # Plot finite prefix; mark first non-finite.
     b_x = np.arange(len(broken))
     finite_mask = np.isfinite(broken)
-    ax.plot(b_x[finite_mask], broken[finite_mask], "o-", color=C_RED, lw=2, label="fp16 + LR=50")
+    ax.plot(b_x[finite_mask], broken[finite_mask], "o-", color=C_RED, lw=2, label="fp16_overflow")
     if (~finite_mask).any() and finite_mask.any():
         i = int(np.argmax(~finite_mask))
         last = float(broken[finite_mask][-1])
         ax.axvline(i, color=C_RED, ls="--", alpha=0.7)
         ax.scatter([i], [last], color=C_RED, s=80, zorder=5)
-        ax.annotate("NaN/Inf", (i, last), textcoords="offset points", xytext=(8, 8), color=C_RED, fontsize=10)
-    ax.plot(np.arange(len(healthy)), healthy, "-", color=C_GREEN, lw=2, label="fp32 master + clip")
+        ax.annotate("NaN", (i, last), textcoords="offset points", xytext=(8, 8), color=C_RED, fontsize=10)
+    ax.plot(np.arange(len(healthy)), healthy, "-", color=C_GREEN, lw=2, label="healthy control")
     ax.set_xlabel("step")
     ax.set_ylabel("loss")
-    ax.set_title("(a) NaN from FP16 overflow")
+    ax.set_title("(b) Example: FP16 overflow curve")
     ax.legend(frameon=False, fontsize=9)
+
+    fig.tight_layout()
+    fig.savefig(out / "nan_catalog.svg", bbox_inches="tight")
+    plt.close(fig)
+
+
+def nan_and_spike_figure(results: dict, out: Path) -> None:
+    spike = _primary(results, "loss_spike")
+    nan = _primary(results, "nan")
+
+    fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.0))
+
+    ax = axes[0]
+    # Compact recipe trigger strip.
+    recipes = nan["recipes"]
+    triggered = [1 if r["triggered"] else 0 for r in recipes]
+    ax.bar(range(len(recipes)), triggered, color=C_RED, width=0.8)
+    ax.set_ylim(0, 1.3)
+    ax.set_yticks([0, 1])
+    ax.set_yticklabels(["no", "yes"])
+    ax.set_xticks(range(len(recipes)))
+    ax.set_xticklabels([r["name"] for r in recipes], rotation=75, ha="right", fontsize=7)
+    ax.set_title(f"(a) NaN recipes triggered ({nan['n_triggered']}/{nan['n_recipes']})")
 
     ax = axes[1]
     losses = np.asarray(spike["losses"], dtype=np.float64)
@@ -347,6 +402,7 @@ def main() -> None:
     results = json.loads(args.results.read_text())
 
     taxonomy_figure(args.out)
+    nan_catalog_figure(results, args.out)
     nan_and_spike_figure(results, args.out)
     drift_and_leak_figure(results, args.out)
     straggler_bad_node_figure(results, args.out)

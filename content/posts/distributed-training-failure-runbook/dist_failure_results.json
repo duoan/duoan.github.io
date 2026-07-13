@@ -23,13 +23,126 @@
           "rank": 0,
           "backend": "gloo",
           "device": "cpu",
+          "recipes": [
+            {
+              "name": "fp16_overflow",
+              "triggered": true,
+              "where": "loss",
+              "detail": "non-finite loss at step 2 (value=nan)",
+              "fix": "FP32 master weights + GradScaler / lower LR / grad clip",
+              "first_step": 2
+            },
+            {
+              "name": "huge_lr_fp32",
+              "triggered": true,
+              "where": "loss",
+              "detail": "non-finite loss at step 3",
+              "fix": "LR warmup / smaller LR / grad clip; LR bugs are not AMP-only",
+              "first_step": 3
+            },
+            {
+              "name": "nan_in_inputs",
+              "triggered": true,
+              "where": "loss",
+              "detail": "NaN in batch \u2192 loss=nan",
+              "fix": "assert isfinite(batch) in dataloader; quarantine corrupt shards",
+              "first_step": 0
+            },
+            {
+              "name": "fp16_matmul_overflow",
+              "triggered": true,
+              "where": "activation",
+              "detail": "fp16 GEMM nonfinite=1761 max=inf; fp32 max=1.84e+05",
+              "fix": "loss scaling / lower activation scale / BF16 where available",
+              "first_step": 0,
+              "fp32_finite": true
+            },
+            {
+              "name": "attention_softmax_nan",
+              "triggered": true,
+              "where": "softmax",
+              "detail": "all_masked_finite=False fp16_scores_finite=True fp16_softmax_finite=True",
+              "fix": "scale 1/sqrt(d); never fully-mask a row; use SDPA / fused attn",
+              "first_step": 0,
+              "fixed_scaled_fp32_finite": true
+            },
+            {
+              "name": "masked_nll_zero_neg_inf",
+              "triggered": true,
+              "where": "loss",
+              "detail": "0*(-inf)=nan broken_sum finite=False allmasked_log_softmax finite=False",
+              "fix": "use ignore_index / masked_fill before softmax / sum only valid positions",
+              "first_step": 0,
+              "fixed_finite": true,
+              "log_probs_finite": true
+            },
+            {
+              "name": "div_by_zero_normalize",
+              "triggered": true,
+              "where": "loss",
+              "detail": "sum/count with count=0 \u2192 -inf",
+              "fix": "clamp denominators; skip empty ranks; use mean over valid only",
+              "first_step": 0,
+              "fixed_finite": true
+            },
+            {
+              "name": "log_of_zero",
+              "triggered": true,
+              "where": "loss",
+              "detail": "log(0)=-inf",
+              "fix": "log(clamp(p, min=eps)); prefer logits + BCEWithLogits / cross_entropy",
+              "first_step": 0,
+              "fixed_finite": true
+            },
+            {
+              "name": "soft_label_vs_neg_inf_logit",
+              "triggered": true,
+              "where": "loss",
+              "detail": "soft label on -inf logit \u2192 inf; log_softmax finite=False",
+              "fix": "forbid -inf logits under soft labels; mask classes; use label smoothing carefully",
+              "first_step": 0,
+              "hard_ce_finite": true
+            },
+            {
+              "name": "adam_moment_poison",
+              "triggered": true,
+              "where": "optimizer_state",
+              "detail": "moment_nan=True param_nan=True",
+              "fix": "skip optimizer.step on non-finite grads; reset Adam state after incident",
+              "first_step": 1
+            },
+            {
+              "name": "ddp_nan_contagion",
+              "triggered": true,
+              "where": "grad",
+              "detail": "ranks_with_nan_grad=2/2",
+              "fix": "detect isfinite per rank before step; quarantine offending rank/batch",
+              "first_step": 1,
+              "ranks_with_nan_grad": 2
+            }
+          ],
+          "n_recipes": 11,
+          "n_triggered": 11,
+          "triggered_names": [
+            "fp16_overflow",
+            "huge_lr_fp32",
+            "nan_in_inputs",
+            "fp16_matmul_overflow",
+            "attention_softmax_nan",
+            "masked_nll_zero_neg_inf",
+            "div_by_zero_normalize",
+            "log_of_zero",
+            "soft_label_vs_neg_inf_logit",
+            "adam_moment_poison",
+            "ddp_nan_contagion"
+          ],
+          "nan_detected": true,
+          "first_nan_step": 2,
           "broken_losses": [
             1.5940316915512085,
-            20.160171508789062,
+            20.160110473632812,
             NaN
           ],
-          "first_nan_step": 2,
-          "nan_detected": true,
           "healthy_losses": [
             1.5940265655517578,
             1.637601375579834,
@@ -50,43 +163,136 @@
             1.5862821340560913,
             1.608133316040039,
             1.6031605005264282,
-            1.6419240236282349,
-            1.5905656814575195,
-            1.6010172367095947,
-            1.5798028707504272,
-            1.610525131225586,
-            1.6211878061294556,
-            1.6124991178512573,
-            1.6133856773376465,
-            1.5916733741760254,
-            1.6168948411941528,
-            1.6360647678375244,
-            1.632096290588379,
-            1.5957924127578735,
-            1.6084814071655273,
-            1.6302130222320557,
-            1.6427083015441895,
-            1.669844627380371,
-            1.5903297662734985,
-            1.6155623197555542,
-            1.5878251791000366,
-            1.6172776222229004
+            1.6419240236282349
           ],
           "healthy_all_finite": true,
-          "fix": "fp32 master weights / GradScaler / lower LR / grad clip; assert isfinite"
+          "fix": "catalog: validate inputs, scale attn, clamp denoms, skip non-finite Adam steps"
         },
         {
           "case": "nan",
           "rank": 1,
           "backend": "gloo",
           "device": "cpu",
+          "recipes": [
+            {
+              "name": "fp16_overflow",
+              "triggered": true,
+              "where": "loss",
+              "detail": "non-finite loss at step 2 (value=nan)",
+              "fix": "FP32 master weights + GradScaler / lower LR / grad clip",
+              "first_step": 2
+            },
+            {
+              "name": "huge_lr_fp32",
+              "triggered": true,
+              "where": "loss",
+              "detail": "non-finite loss at step 3",
+              "fix": "LR warmup / smaller LR / grad clip; LR bugs are not AMP-only",
+              "first_step": 3
+            },
+            {
+              "name": "nan_in_inputs",
+              "triggered": true,
+              "where": "loss",
+              "detail": "NaN in batch \u2192 loss=nan",
+              "fix": "assert isfinite(batch) in dataloader; quarantine corrupt shards",
+              "first_step": 0
+            },
+            {
+              "name": "fp16_matmul_overflow",
+              "triggered": true,
+              "where": "activation",
+              "detail": "fp16 GEMM nonfinite=1761 max=inf; fp32 max=1.84e+05",
+              "fix": "loss scaling / lower activation scale / BF16 where available",
+              "first_step": 0,
+              "fp32_finite": true
+            },
+            {
+              "name": "attention_softmax_nan",
+              "triggered": true,
+              "where": "softmax",
+              "detail": "all_masked_finite=False fp16_scores_finite=True fp16_softmax_finite=True",
+              "fix": "scale 1/sqrt(d); never fully-mask a row; use SDPA / fused attn",
+              "first_step": 0,
+              "fixed_scaled_fp32_finite": true
+            },
+            {
+              "name": "masked_nll_zero_neg_inf",
+              "triggered": true,
+              "where": "loss",
+              "detail": "0*(-inf)=nan broken_sum finite=False allmasked_log_softmax finite=False",
+              "fix": "use ignore_index / masked_fill before softmax / sum only valid positions",
+              "first_step": 0,
+              "fixed_finite": true,
+              "log_probs_finite": true
+            },
+            {
+              "name": "div_by_zero_normalize",
+              "triggered": true,
+              "where": "loss",
+              "detail": "sum/count with count=0 \u2192 -inf",
+              "fix": "clamp denominators; skip empty ranks; use mean over valid only",
+              "first_step": 0,
+              "fixed_finite": true
+            },
+            {
+              "name": "log_of_zero",
+              "triggered": true,
+              "where": "loss",
+              "detail": "log(0)=-inf",
+              "fix": "log(clamp(p, min=eps)); prefer logits + BCEWithLogits / cross_entropy",
+              "first_step": 0,
+              "fixed_finite": true
+            },
+            {
+              "name": "soft_label_vs_neg_inf_logit",
+              "triggered": true,
+              "where": "loss",
+              "detail": "soft label on -inf logit \u2192 inf; log_softmax finite=False",
+              "fix": "forbid -inf logits under soft labels; mask classes; use label smoothing carefully",
+              "first_step": 0,
+              "hard_ce_finite": true
+            },
+            {
+              "name": "adam_moment_poison",
+              "triggered": true,
+              "where": "optimizer_state",
+              "detail": "moment_nan=True param_nan=True",
+              "fix": "skip optimizer.step on non-finite grads; reset Adam state after incident",
+              "first_step": 1
+            },
+            {
+              "name": "ddp_nan_contagion",
+              "triggered": true,
+              "where": "grad",
+              "detail": "ranks_with_nan_grad=2/2",
+              "fix": "detect isfinite per rank before step; quarantine offending rank/batch",
+              "first_step": 1,
+              "ranks_with_nan_grad": 2
+            }
+          ],
+          "n_recipes": 11,
+          "n_triggered": 11,
+          "triggered_names": [
+            "fp16_overflow",
+            "huge_lr_fp32",
+            "nan_in_inputs",
+            "fp16_matmul_overflow",
+            "attention_softmax_nan",
+            "masked_nll_zero_neg_inf",
+            "div_by_zero_normalize",
+            "log_of_zero",
+            "soft_label_vs_neg_inf_logit",
+            "adam_moment_poison",
+            "ddp_nan_contagion"
+          ],
+          "nan_detected": true,
+          "first_nan_step": 2,
           "broken_losses": [
             1.5940316915512085,
-            20.160171508789062,
+            20.160110473632812,
             NaN
           ],
-          "first_nan_step": 2,
-          "nan_detected": true,
           "healthy_losses": [
             1.5940265655517578,
             1.637601375579834,
@@ -107,30 +313,10 @@
             1.5862821340560913,
             1.608133316040039,
             1.6031605005264282,
-            1.6419240236282349,
-            1.5905656814575195,
-            1.6010172367095947,
-            1.5798028707504272,
-            1.610525131225586,
-            1.6211878061294556,
-            1.6124991178512573,
-            1.6133856773376465,
-            1.5916733741760254,
-            1.6168948411941528,
-            1.6360647678375244,
-            1.632096290588379,
-            1.5957924127578735,
-            1.6084814071655273,
-            1.6302130222320557,
-            1.6427083015441895,
-            1.669844627380371,
-            1.5903297662734985,
-            1.6155623197555542,
-            1.5878251791000366,
-            1.6172776222229004
+            1.6419240236282349
           ],
           "healthy_all_finite": true,
-          "fix": "fp32 master weights / GradScaler / lower LR / grad clip; assert isfinite"
+          "fix": "catalog: validate inputs, scale attn, clamp denoms, skip non-finite Adam steps"
         }
       ],
       "primary": {
@@ -138,13 +324,126 @@
         "rank": 0,
         "backend": "gloo",
         "device": "cpu",
+        "recipes": [
+          {
+            "name": "fp16_overflow",
+            "triggered": true,
+            "where": "loss",
+            "detail": "non-finite loss at step 2 (value=nan)",
+            "fix": "FP32 master weights + GradScaler / lower LR / grad clip",
+            "first_step": 2
+          },
+          {
+            "name": "huge_lr_fp32",
+            "triggered": true,
+            "where": "loss",
+            "detail": "non-finite loss at step 3",
+            "fix": "LR warmup / smaller LR / grad clip; LR bugs are not AMP-only",
+            "first_step": 3
+          },
+          {
+            "name": "nan_in_inputs",
+            "triggered": true,
+            "where": "loss",
+            "detail": "NaN in batch \u2192 loss=nan",
+            "fix": "assert isfinite(batch) in dataloader; quarantine corrupt shards",
+            "first_step": 0
+          },
+          {
+            "name": "fp16_matmul_overflow",
+            "triggered": true,
+            "where": "activation",
+            "detail": "fp16 GEMM nonfinite=1761 max=inf; fp32 max=1.84e+05",
+            "fix": "loss scaling / lower activation scale / BF16 where available",
+            "first_step": 0,
+            "fp32_finite": true
+          },
+          {
+            "name": "attention_softmax_nan",
+            "triggered": true,
+            "where": "softmax",
+            "detail": "all_masked_finite=False fp16_scores_finite=True fp16_softmax_finite=True",
+            "fix": "scale 1/sqrt(d); never fully-mask a row; use SDPA / fused attn",
+            "first_step": 0,
+            "fixed_scaled_fp32_finite": true
+          },
+          {
+            "name": "masked_nll_zero_neg_inf",
+            "triggered": true,
+            "where": "loss",
+            "detail": "0*(-inf)=nan broken_sum finite=False allmasked_log_softmax finite=False",
+            "fix": "use ignore_index / masked_fill before softmax / sum only valid positions",
+            "first_step": 0,
+            "fixed_finite": true,
+            "log_probs_finite": true
+          },
+          {
+            "name": "div_by_zero_normalize",
+            "triggered": true,
+            "where": "loss",
+            "detail": "sum/count with count=0 \u2192 -inf",
+            "fix": "clamp denominators; skip empty ranks; use mean over valid only",
+            "first_step": 0,
+            "fixed_finite": true
+          },
+          {
+            "name": "log_of_zero",
+            "triggered": true,
+            "where": "loss",
+            "detail": "log(0)=-inf",
+            "fix": "log(clamp(p, min=eps)); prefer logits + BCEWithLogits / cross_entropy",
+            "first_step": 0,
+            "fixed_finite": true
+          },
+          {
+            "name": "soft_label_vs_neg_inf_logit",
+            "triggered": true,
+            "where": "loss",
+            "detail": "soft label on -inf logit \u2192 inf; log_softmax finite=False",
+            "fix": "forbid -inf logits under soft labels; mask classes; use label smoothing carefully",
+            "first_step": 0,
+            "hard_ce_finite": true
+          },
+          {
+            "name": "adam_moment_poison",
+            "triggered": true,
+            "where": "optimizer_state",
+            "detail": "moment_nan=True param_nan=True",
+            "fix": "skip optimizer.step on non-finite grads; reset Adam state after incident",
+            "first_step": 1
+          },
+          {
+            "name": "ddp_nan_contagion",
+            "triggered": true,
+            "where": "grad",
+            "detail": "ranks_with_nan_grad=2/2",
+            "fix": "detect isfinite per rank before step; quarantine offending rank/batch",
+            "first_step": 1,
+            "ranks_with_nan_grad": 2
+          }
+        ],
+        "n_recipes": 11,
+        "n_triggered": 11,
+        "triggered_names": [
+          "fp16_overflow",
+          "huge_lr_fp32",
+          "nan_in_inputs",
+          "fp16_matmul_overflow",
+          "attention_softmax_nan",
+          "masked_nll_zero_neg_inf",
+          "div_by_zero_normalize",
+          "log_of_zero",
+          "soft_label_vs_neg_inf_logit",
+          "adam_moment_poison",
+          "ddp_nan_contagion"
+        ],
+        "nan_detected": true,
+        "first_nan_step": 2,
         "broken_losses": [
           1.5940316915512085,
-          20.160171508789062,
+          20.160110473632812,
           NaN
         ],
-        "first_nan_step": 2,
-        "nan_detected": true,
         "healthy_losses": [
           1.5940265655517578,
           1.637601375579834,
@@ -165,33 +464,28 @@
           1.5862821340560913,
           1.608133316040039,
           1.6031605005264282,
-          1.6419240236282349,
-          1.5905656814575195,
-          1.6010172367095947,
-          1.5798028707504272,
-          1.610525131225586,
-          1.6211878061294556,
-          1.6124991178512573,
-          1.6133856773376465,
-          1.5916733741760254,
-          1.6168948411941528,
-          1.6360647678375244,
-          1.632096290588379,
-          1.5957924127578735,
-          1.6084814071655273,
-          1.6302130222320557,
-          1.6427083015441895,
-          1.669844627380371,
-          1.5903297662734985,
-          1.6155623197555542,
-          1.5878251791000366,
-          1.6172776222229004
+          1.6419240236282349
         ],
         "healthy_all_finite": true,
-        "fix": "fp32 master weights / GradScaler / lower LR / grad clip; assert isfinite"
+        "fix": "catalog: validate inputs, scale attn, clamp denoms, skip non-finite Adam steps"
       },
       "nan_detected": true,
-      "first_nan_step": 2
+      "first_nan_step": 2,
+      "n_triggered": 11,
+      "triggered_names": [
+        "fp16_overflow",
+        "huge_lr_fp32",
+        "nan_in_inputs",
+        "fp16_matmul_overflow",
+        "attention_softmax_nan",
+        "masked_nll_zero_neg_inf",
+        "div_by_zero_normalize",
+        "log_of_zero",
+        "soft_label_vs_neg_inf_logit",
+        "adam_moment_poison",
+        "ddp_nan_contagion"
+      ],
+      "n_recipes": 11
     },
     "loss_spike": {
       "case": "loss_spike",
@@ -938,48 +1232,48 @@
           "injected_sleep_ms": 120.0,
           "onset_step": 8,
           "collective_ms": [
-            0.11325199739076197,
-            0.1531850139144808,
-            0.08651800453662872,
-            0.46026098425500095,
-            1.1831820011138916,
-            0.1086719857994467,
-            0.316035992000252,
-            0.18792899209074676,
-            120.61716400785372,
-            120.78271299833432,
-            120.76810200233012,
-            122.12183399242349,
-            120.73012799373828,
-            120.71671299054287,
-            120.64380699303001,
-            120.73308401159011,
-            120.83042701124214,
-            120.60435998137109
+            0.442627992015332,
+            0.12272299500182271,
+            0.1044970122165978,
+            0.13433201820589602,
+            0.09377099922858179,
+            0.133096007630229,
+            0.11829598224721849,
+            2.772137988358736,
+            120.77550502726808,
+            120.80795899964869,
+            121.05026200879365,
+            120.53372801165096,
+            120.56317098904401,
+            121.09759799204767,
+            120.99017700529657,
+            120.7829510094598,
+            120.85941998520866,
+            120.74521998874843
           ],
           "step_ms": [
-            0.11325199739076197,
-            0.1531850139144808,
-            0.08651800453662872,
-            0.46026098425500095,
-            1.1831820011138916,
-            0.1086719857994467,
-            0.316035992000252,
-            0.18792899209074676,
-            120.61716400785372,
-            120.78271299833432,
-            120.76810200233012,
-            122.12183399242349,
-            120.73012799373828,
-            120.71671299054287,
-            120.64380699303001,
-            120.73308401159011,
-            120.83042701124214,
-            120.60435998137109
+            0.442627992015332,
+            0.12272299500182271,
+            0.1044970122165978,
+            0.13433201820589602,
+            0.09377099922858179,
+            0.133096007630229,
+            0.11829598224721849,
+            2.772137988358736,
+            120.77550502726808,
+            120.80795899964869,
+            121.05026200879365,
+            120.53372801165096,
+            120.56317098904401,
+            121.09759799204767,
+            120.99017700529657,
+            120.7829510094598,
+            120.85941998520866,
+            120.74521998874843
           ],
-          "pre_median_ms": 0.316035992000252,
-          "post_median_ms": 120.7316060026642,
-          "slowdown": 382.018532884596,
+          "pre_median_ms": 0.133096007630229,
+          "post_median_ms": 120.79545500455424,
+          "slowdown": 907.5813554088828,
           "detected": true,
           "fix": "per-rank timers around collectives; slowest rank sets the pace"
         },
@@ -991,48 +1285,48 @@
           "injected_sleep_ms": 120.0,
           "onset_step": 8,
           "collective_ms": [
-            0.1346729986835271,
-            3.3340219815727323,
-            1.9820980087388307,
-            2.643028012244031,
-            1.2133790005464107,
-            0.132308981847018,
-            3.2319760066457093,
-            0.22320699645206332,
-            120.75371301034465,
-            120.94880599761382,
-            120.68133099819534,
-            120.83831199561246,
-            120.94796801102348,
-            120.89944799663499,
-            120.79698001616634,
-            120.72580301901326,
-            120.99971598945558,
-            120.73871900793165
+            0.1620490220375359,
+            0.1274980022571981,
+            0.09147200034931302,
+            0.13881901395507157,
+            0.18632100545801222,
+            3.3069690107367933,
+            6.022416026098654,
+            0.08138298289850354,
+            121.01584597257897,
+            120.79636901034974,
+            121.25511802150868,
+            120.67404898698442,
+            121.11442000605166,
+            121.01794499903917,
+            120.63490401487797,
+            120.91969899483956,
+            121.0348519962281,
+            120.60722097521648
           ],
           "step_ms": [
-            0.1346729986835271,
-            3.3340219815727323,
-            1.9820980087388307,
-            2.643028012244031,
-            1.2133790005464107,
-            0.132308981847018,
-            3.2319760066457093,
-            0.22320699645206332,
-            120.75371301034465,
-            120.94880599761382,
-            120.68133099819534,
-            120.83831199561246,
-            120.94796801102348,
-            120.89944799663499,
-            120.79698001616634,
-            120.72580301901326,
-            120.99971598945558,
-            120.73871900793165
+            0.1620490220375359,
+            0.1274980022571981,
+            0.09147200034931302,
+            0.13881901395507157,
+            0.18632100545801222,
+            3.3069690107367933,
+            6.022416026098654,
+            0.08138298289850354,
+            121.01584597257897,
+            120.79636901034974,
+            121.25511802150868,
+            120.67404898698442,
+            121.11442000605166,
+            121.01794499903917,
+            120.63490401487797,
+            120.91969899483956,
+            121.0348519962281,
+            120.60722097521648
           ],
-          "pre_median_ms": 1.2133790005464107,
-          "post_median_ms": 120.8176460058894,
-          "slowdown": 99.57123532835381,
+          "pre_median_ms": 0.18632100545801222,
+          "post_median_ms": 120.96777248370927,
+          "slowdown": 649.243879863935,
           "detected": true,
           "fix": "per-rank timers around collectives; slowest rank sets the pace"
         }
@@ -1045,53 +1339,53 @@
         "injected_sleep_ms": 120.0,
         "onset_step": 8,
         "collective_ms": [
-          0.11325199739076197,
-          0.1531850139144808,
-          0.08651800453662872,
-          0.46026098425500095,
-          1.1831820011138916,
-          0.1086719857994467,
-          0.316035992000252,
-          0.18792899209074676,
-          120.61716400785372,
-          120.78271299833432,
-          120.76810200233012,
-          122.12183399242349,
-          120.73012799373828,
-          120.71671299054287,
-          120.64380699303001,
-          120.73308401159011,
-          120.83042701124214,
-          120.60435998137109
+          0.442627992015332,
+          0.12272299500182271,
+          0.1044970122165978,
+          0.13433201820589602,
+          0.09377099922858179,
+          0.133096007630229,
+          0.11829598224721849,
+          2.772137988358736,
+          120.77550502726808,
+          120.80795899964869,
+          121.05026200879365,
+          120.53372801165096,
+          120.56317098904401,
+          121.09759799204767,
+          120.99017700529657,
+          120.7829510094598,
+          120.85941998520866,
+          120.74521998874843
         ],
         "step_ms": [
-          0.11325199739076197,
-          0.1531850139144808,
-          0.08651800453662872,
-          0.46026098425500095,
-          1.1831820011138916,
-          0.1086719857994467,
-          0.316035992000252,
-          0.18792899209074676,
-          120.61716400785372,
-          120.78271299833432,
-          120.76810200233012,
-          122.12183399242349,
-          120.73012799373828,
-          120.71671299054287,
-          120.64380699303001,
-          120.73308401159011,
-          120.83042701124214,
-          120.60435998137109
+          0.442627992015332,
+          0.12272299500182271,
+          0.1044970122165978,
+          0.13433201820589602,
+          0.09377099922858179,
+          0.133096007630229,
+          0.11829598224721849,
+          2.772137988358736,
+          120.77550502726808,
+          120.80795899964869,
+          121.05026200879365,
+          120.53372801165096,
+          120.56317098904401,
+          121.09759799204767,
+          120.99017700529657,
+          120.7829510094598,
+          120.85941998520866,
+          120.74521998874843
         ],
-        "pre_median_ms": 0.316035992000252,
-        "post_median_ms": 120.7316060026642,
-        "slowdown": 382.018532884596,
+        "pre_median_ms": 0.133096007630229,
+        "post_median_ms": 120.79545500455424,
+        "slowdown": 907.5813554088828,
         "detected": true,
         "fix": "per-rank timers around collectives; slowest rank sets the pace"
       },
       "detected": true,
-      "slowdown": 382.018532884596
+      "slowdown": 907.5813554088828
     },
     "bad_node": {
       "case": "bad_node",
@@ -1109,55 +1403,55 @@
           "bad_rank": 0,
           "inflate_matmul_loops": 12,
           "local_compute_ms": [
-            7.984589989064261,
-            0.398689997382462,
-            1.1313349823467433,
-            3.2592920179013163,
-            3.364082018379122,
-            7.099167996784672,
-            7.051248016068712,
-            7.063783996272832,
-            0.16963001689873636,
-            3.1190529989544302,
-            2.3515229986514896,
-            3.3586740028113127,
-            3.193540993379429,
-            3.2814159931149334,
-            3.3427410235162824,
-            3.2820830238051713,
-            3.2761430193204433,
-            3.2651579822413623,
-            3.215769975213334,
-            3.2548029848840088
+            4.167448991211131,
+            1.0157150099985301,
+            7.025820988928899,
+            6.507682002848014,
+            7.191690994659439,
+            7.0656439929734915,
+            6.339139014016837,
+            3.438352025114,
+            9.900846984237432,
+            2.8462370100896806,
+            7.762831985019147,
+            7.455826998921111,
+            3.5733219992835075,
+            7.038535986794159,
+            3.6481590068433434,
+            7.087395992130041,
+            7.094698987202719,
+            7.74567000917159,
+            7.116893015336245,
+            7.021434023045003
           ],
           "step_ms": [
-            90.37364399409853,
-            23.447265004506335,
-            11.213363002752885,
-            11.117963993456215,
-            12.475529016228393,
-            76.20841599418782,
-            91.85754801728763,
-            75.43175702448934,
-            8.331707998877391,
-            5.518164020031691,
-            6.413169001461938,
-            15.35891997627914,
-            7.821025996236131,
-            7.801005995133892,
-            7.9451480123680085,
-            7.941404008306563,
-            7.898451003711671,
-            7.916806993307546,
-            7.7852639951743186,
-            4.515873995842412
+            91.63956201518886,
+            13.528165000025183,
+            84.60014499723911,
+            93.09475601185113,
+            89.21781499520876,
+            89.78496200870723,
+            87.4189090100117,
+            86.66474200435914,
+            93.83696099394001,
+            87.04348100582138,
+            14.88959600101225,
+            11.647702980553731,
+            88.85504500358365,
+            86.83206301066093,
+            40.71177000878379,
+            87.68674798193388,
+            85.11484100017697,
+            86.94146000198089,
+            80.59349202085286,
+            92.42432299652137
           ],
           "per_rank_local_mean_ms": [
-            3.6231362013495527,
-            0.0002274508005939424
+            6.052167250891216,
+            0.00022474996512755752
           ],
           "ratio_vs_fastest": [
-            15929.318304831002,
+            26928.445783990624,
             1.0
           ],
           "flagged_ranks": [
@@ -1173,55 +1467,55 @@
           "bad_rank": 0,
           "inflate_matmul_loops": 12,
           "local_compute_ms": [
-            0.0004159810487180948,
-            0.00031100353226065636,
-            0.00030899536795914173,
-            0.00018198625184595585,
-            0.0002270098775625229,
-            0.00019700382836163044,
-            0.0002119923010468483,
+            0.0003759923856705427,
+            0.0002640008460730314,
             0.00020998413674533367,
-            0.00021600862964987755,
-            0.0001860025804489851,
+            0.00024901237338781357,
+            0.00021798769012093544,
+            0.00023801112547516823,
+            0.00022299354895949364,
+            0.00020797597244381905,
+            0.0001840235199779272,
+            0.00017401180230081081,
             0.00022101448848843575,
+            0.00026499037630856037,
+            0.00023000757209956646,
+            0.0001709850039333105,
+            0.00023501343093812466,
+            0.00023198663257062435,
+            0.0001619919203221798,
             0.00022799940779805183,
-            0.00020299921743571758,
-            0.00019700382836163044,
-            0.0001969747245311737,
-            0.00019001890905201435,
-            0.00021600862964987755,
-            0.0002100132405757904,
-            0.00019901199266314507,
-            0.0002220040187239647
+            0.00021301093511283398,
+            0.00019400613382458687
           ],
           "step_ms": [
-            90.37752298172563,
-            25.39195099961944,
-            8.474242989905179,
-            7.961678988067433,
-            11.588808993110433,
-            81.01395599078387,
-            91.96178001002409,
-            79.59986198693514,
-            8.051389013417065,
-            0.7889819971751422,
-            3.9608170045539737,
-            14.7797710087616,
-            7.833358977222815,
-            7.892517984146252,
-            7.895048998761922,
-            7.87675500032492,
-            7.903769990662113,
-            7.914183021057397,
-            7.831074995920062,
-            7.806694018654525
+            91.57128099468537,
+            13.494637998519465,
+            84.63615397340618,
+            93.15293200779706,
+            89.20836198376492,
+            89.9439450004138,
+            87.39654801320285,
+            86.4873779937625,
+            93.85615400969982,
+            87.03524200245738,
+            14.877374022034928,
+            11.665389989502728,
+            88.8215949817095,
+            86.80909100803547,
+            40.727373998379335,
+            87.7114419999998,
+            85.12742599123158,
+            86.72058201045729,
+            80.7786780060269,
+            92.26605898584239
           ],
           "per_rank_local_mean_ms": [
-            3.6231362013495527,
-            0.0002274508005939424
+            6.052167250891216,
+            0.00022474996512755752
           ],
           "ratio_vs_fastest": [
-            15929.318304831002,
+            26928.445783990624,
             1.0
           ],
           "flagged_ranks": [
@@ -1238,55 +1532,55 @@
         "bad_rank": 0,
         "inflate_matmul_loops": 12,
         "local_compute_ms": [
-          7.984589989064261,
-          0.398689997382462,
-          1.1313349823467433,
-          3.2592920179013163,
-          3.364082018379122,
-          7.099167996784672,
-          7.051248016068712,
-          7.063783996272832,
-          0.16963001689873636,
-          3.1190529989544302,
-          2.3515229986514896,
-          3.3586740028113127,
-          3.193540993379429,
-          3.2814159931149334,
-          3.3427410235162824,
-          3.2820830238051713,
-          3.2761430193204433,
-          3.2651579822413623,
-          3.215769975213334,
-          3.2548029848840088
+          4.167448991211131,
+          1.0157150099985301,
+          7.025820988928899,
+          6.507682002848014,
+          7.191690994659439,
+          7.0656439929734915,
+          6.339139014016837,
+          3.438352025114,
+          9.900846984237432,
+          2.8462370100896806,
+          7.762831985019147,
+          7.455826998921111,
+          3.5733219992835075,
+          7.038535986794159,
+          3.6481590068433434,
+          7.087395992130041,
+          7.094698987202719,
+          7.74567000917159,
+          7.116893015336245,
+          7.021434023045003
         ],
         "step_ms": [
-          90.37364399409853,
-          23.447265004506335,
-          11.213363002752885,
-          11.117963993456215,
-          12.475529016228393,
-          76.20841599418782,
-          91.85754801728763,
-          75.43175702448934,
-          8.331707998877391,
-          5.518164020031691,
-          6.413169001461938,
-          15.35891997627914,
-          7.821025996236131,
-          7.801005995133892,
-          7.9451480123680085,
-          7.941404008306563,
-          7.898451003711671,
-          7.916806993307546,
-          7.7852639951743186,
-          4.515873995842412
+          91.63956201518886,
+          13.528165000025183,
+          84.60014499723911,
+          93.09475601185113,
+          89.21781499520876,
+          89.78496200870723,
+          87.4189090100117,
+          86.66474200435914,
+          93.83696099394001,
+          87.04348100582138,
+          14.88959600101225,
+          11.647702980553731,
+          88.85504500358365,
+          86.83206301066093,
+          40.71177000878379,
+          87.68674798193388,
+          85.11484100017697,
+          86.94146000198089,
+          80.59349202085286,
+          92.42432299652137
         ],
         "per_rank_local_mean_ms": [
-          3.6231362013495527,
-          0.0002274508005939424
+          6.052167250891216,
+          0.00022474996512755752
         ],
         "ratio_vs_fastest": [
-          15929.318304831002,
+          26928.445783990624,
           1.0
         ],
         "flagged_ranks": [
@@ -1313,9 +1607,9 @@
           "hang_rank": 1,
           "healthy_collective_ok": true,
           "timeout_s": 2.0,
-          "peer_wait_ms": 51.52104498120025,
+          "peer_wait_ms": 51.7781869857572,
           "hang_injected": true,
-          "error": "RuntimeError: [/pytorch/third_party/gloo/gloo/transport/tcp/pair.cc:547] Connection closed by peer [127.0.0.1]:35013",
+          "error": "RuntimeError: [/pytorch/third_party/gloo/gloo/transport/tcp/pair.cc:547] Connection closed by peer [127.0.0.1]:45454",
           "fix": "NCCL_DEBUG=INFO, TORCH_NCCL_ASYNC_ERROR_HANDLING=1, per-rank heartbeats"
         },
         {
@@ -1338,15 +1632,15 @@
         "hang_rank": 1,
         "healthy_collective_ok": true,
         "timeout_s": 2.0,
-        "peer_wait_ms": 51.52104498120025,
+        "peer_wait_ms": 51.7781869857572,
         "hang_injected": true,
-        "error": "RuntimeError: [/pytorch/third_party/gloo/gloo/transport/tcp/pair.cc:547] Connection closed by peer [127.0.0.1]:35013",
+        "error": "RuntimeError: [/pytorch/third_party/gloo/gloo/transport/tcp/pair.cc:547] Connection closed by peer [127.0.0.1]:45454",
         "fix": "NCCL_DEBUG=INFO, TORCH_NCCL_ASYNC_ERROR_HANDLING=1, per-rank heartbeats"
       },
       "hang_confirmed": true,
-      "symptom": "peer collective error: RuntimeError: [/pytorch/third_party/gloo/gloo/transport/tcp/pair.cc:547] Connection closed by peer [127.0.0.1]:35013",
+      "symptom": "peer collective error: RuntimeError: [/pytorch/third_party/gloo/gloo/transport/tcp/pair.cc:547] Connection closed by peer [127.0.0.1]:45454",
       "peer_errors": [
-        "RuntimeError: [/pytorch/third_party/gloo/gloo/transport/tcp/pair.cc:547] Connection closed by peer [127.0.0.1]:35013"
+        "RuntimeError: [/pytorch/third_party/gloo/gloo/transport/tcp/pair.cc:547] Connection closed by peer [127.0.0.1]:45454"
       ]
     },
     "throughput_cliff": {
@@ -1368,57 +1662,57 @@
             {
               "batch_size_per_rank": 1,
               "global_batch": 2,
-              "median_step_ms": 69.29118600965012,
-              "samples_per_s": 28.86369991879576
+              "median_step_ms": 67.9890309838811,
+              "samples_per_s": 29.416509855452446
             },
             {
               "batch_size_per_rank": 2,
               "global_batch": 4,
-              "median_step_ms": 53.207927994662896,
-              "samples_per_s": 75.17676689836948
+              "median_step_ms": 54.83794750762172,
+              "samples_per_s": 72.94219024962696
             },
             {
               "batch_size_per_rank": 4,
               "global_batch": 8,
-              "median_step_ms": 53.0312834889628,
-              "samples_per_s": 150.85435376394406
+              "median_step_ms": 51.03733700525481,
+              "samples_per_s": 156.7479901856227
             },
             {
               "batch_size_per_rank": 8,
               "global_batch": 16,
-              "median_step_ms": 89.05550600320566,
-              "samples_per_s": 179.6632315965288
+              "median_step_ms": 88.60181849740911,
+              "samples_per_s": 180.5832010148626
             },
             {
               "batch_size_per_rank": 16,
               "global_batch": 32,
-              "median_step_ms": 87.53446700575296,
-              "samples_per_s": 365.57028442175687
+              "median_step_ms": 21.43439148494508,
+              "samples_per_s": 1492.927850201668
             },
             {
               "batch_size_per_rank": 32,
               "global_batch": 64,
-              "median_step_ms": 90.08205401187297,
-              "samples_per_s": 710.463373665577
+              "median_step_ms": 88.48229749128222,
+              "samples_per_s": 723.3085240164072
             },
             {
               "batch_size_per_rank": 64,
               "global_batch": 128,
-              "median_step_ms": 86.05643399641849,
-              "samples_per_s": 1487.3960499609723
+              "median_step_ms": 88.61523799714632,
+              "samples_per_s": 1444.446834348309
             },
             {
               "batch_size_per_rank": 128,
               "global_batch": 256,
-              "median_step_ms": 107.94544550299179,
-              "samples_per_s": 2371.5683307166933
+              "median_step_ms": 110.61673449876253,
+              "samples_per_s": 2314.2972097306297
             }
           ],
           "peak_batch_size": 128,
-          "peak_samples_per_s": 2371.5683307166933,
+          "peak_samples_per_s": 2314.2972097306297,
           "cliff_batch_size": 1,
-          "cliff_samples_per_s": 28.86369991879576,
-          "cliff_ratio_vs_peak": 0.01217072244765264,
+          "cliff_samples_per_s": 29.416509855452446,
+          "cliff_ratio_vs_peak": 0.012710774455315682,
           "fix": "raise local work / overlap comm; avoid tiny microbatches with fat collectives"
         },
         {
@@ -1431,57 +1725,57 @@
             {
               "batch_size_per_rank": 1,
               "global_batch": 2,
-              "median_step_ms": 69.974808517145,
-              "samples_per_s": 28.5817145110153
+              "median_step_ms": 68.25278700853232,
+              "samples_per_s": 29.302832714361962
             },
             {
               "batch_size_per_rank": 2,
               "global_batch": 4,
-              "median_step_ms": 53.22024600172881,
-              "samples_per_s": 75.1593669798156
+              "median_step_ms": 54.97236950031947,
+              "samples_per_s": 72.76382728921216
             },
             {
               "batch_size_per_rank": 4,
               "global_batch": 8,
-              "median_step_ms": 53.06268349522725,
-              "samples_per_s": 150.76508523583365
+              "median_step_ms": 50.749328001984395,
+              "samples_per_s": 157.63755531279517
             },
             {
               "batch_size_per_rank": 8,
               "global_batch": 16,
-              "median_step_ms": 89.08598501875531,
-              "samples_per_s": 179.60176335965207
+              "median_step_ms": 88.70058148750104,
+              "samples_per_s": 180.38213201854364
             },
             {
               "batch_size_per_rank": 16,
               "global_batch": 32,
-              "median_step_ms": 87.28504150349181,
-              "samples_per_s": 366.6149370934291
+              "median_step_ms": 22.09394850069657,
+              "samples_per_s": 1448.3603960148234
             },
             {
               "batch_size_per_rank": 32,
               "global_batch": 64,
-              "median_step_ms": 89.99963900714647,
-              "samples_per_s": 711.1139634117649
+              "median_step_ms": 87.93968200916424,
+              "samples_per_s": 727.7715649839457
             },
             {
               "batch_size_per_rank": 64,
               "global_batch": 128,
-              "median_step_ms": 86.14183898316696,
-              "samples_per_s": 1485.9213770095223
+              "median_step_ms": 87.57928550767247,
+              "samples_per_s": 1461.5328186113877
             },
             {
               "batch_size_per_rank": 128,
               "global_batch": 256,
-              "median_step_ms": 107.2543555055745,
-              "samples_per_s": 2386.8494551411904
+              "median_step_ms": 111.69852699094918,
+              "samples_per_s": 2291.883401656169
             }
           ],
           "peak_batch_size": 128,
-          "peak_samples_per_s": 2386.8494551411904,
+          "peak_samples_per_s": 2291.883401656169,
           "cliff_batch_size": 1,
-          "cliff_samples_per_s": 28.5817145110153,
-          "cliff_ratio_vs_peak": 0.011974661598137782,
+          "cliff_samples_per_s": 29.302832714361962,
+          "cliff_ratio_vs_peak": 0.012785481448657921,
           "fix": "raise local work / overlap comm; avoid tiny microbatches with fat collectives"
         }
       ],
@@ -1495,60 +1789,60 @@
           {
             "batch_size_per_rank": 1,
             "global_batch": 2,
-            "median_step_ms": 69.29118600965012,
-            "samples_per_s": 28.86369991879576
+            "median_step_ms": 67.9890309838811,
+            "samples_per_s": 29.416509855452446
           },
           {
             "batch_size_per_rank": 2,
             "global_batch": 4,
-            "median_step_ms": 53.207927994662896,
-            "samples_per_s": 75.17676689836948
+            "median_step_ms": 54.83794750762172,
+            "samples_per_s": 72.94219024962696
           },
           {
             "batch_size_per_rank": 4,
             "global_batch": 8,
-            "median_step_ms": 53.0312834889628,
-            "samples_per_s": 150.85435376394406
+            "median_step_ms": 51.03733700525481,
+            "samples_per_s": 156.7479901856227
           },
           {
             "batch_size_per_rank": 8,
             "global_batch": 16,
-            "median_step_ms": 89.05550600320566,
-            "samples_per_s": 179.6632315965288
+            "median_step_ms": 88.60181849740911,
+            "samples_per_s": 180.5832010148626
           },
           {
             "batch_size_per_rank": 16,
             "global_batch": 32,
-            "median_step_ms": 87.53446700575296,
-            "samples_per_s": 365.57028442175687
+            "median_step_ms": 21.43439148494508,
+            "samples_per_s": 1492.927850201668
           },
           {
             "batch_size_per_rank": 32,
             "global_batch": 64,
-            "median_step_ms": 90.08205401187297,
-            "samples_per_s": 710.463373665577
+            "median_step_ms": 88.48229749128222,
+            "samples_per_s": 723.3085240164072
           },
           {
             "batch_size_per_rank": 64,
             "global_batch": 128,
-            "median_step_ms": 86.05643399641849,
-            "samples_per_s": 1487.3960499609723
+            "median_step_ms": 88.61523799714632,
+            "samples_per_s": 1444.446834348309
           },
           {
             "batch_size_per_rank": 128,
             "global_batch": 256,
-            "median_step_ms": 107.94544550299179,
-            "samples_per_s": 2371.5683307166933
+            "median_step_ms": 110.61673449876253,
+            "samples_per_s": 2314.2972097306297
           }
         ],
         "peak_batch_size": 128,
-        "peak_samples_per_s": 2371.5683307166933,
+        "peak_samples_per_s": 2314.2972097306297,
         "cliff_batch_size": 1,
-        "cliff_samples_per_s": 28.86369991879576,
-        "cliff_ratio_vs_peak": 0.01217072244765264,
+        "cliff_samples_per_s": 29.416509855452446,
+        "cliff_ratio_vs_peak": 0.012710774455315682,
         "fix": "raise local work / overlap comm; avoid tiny microbatches with fat collectives"
       },
-      "cliff_ratio_vs_peak": 0.01217072244765264
+      "cliff_ratio_vs_peak": 0.012710774455315682
     }
   }
 }

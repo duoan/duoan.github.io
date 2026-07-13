@@ -2,7 +2,7 @@
 
 Cases (each returns structured JSON metrics):
 
-  1. nan              — FP16 overflow → NaN loss / grads
+  1. nan              — catalog of common NaN/Inf recipes (AMP, data, masks, DDP, …)
   2. loss_spike       — rare corrupt batch → transient loss explosion
   3. numerical_drift  — silent rank desync (local-only param update)
   4. memory_leak      — retained activation references grow RSS / CUDA alloc
@@ -33,6 +33,7 @@ import os
 import queue
 import time
 from pathlib import Path
+from typing import Any
 
 import modal
 import numpy as np
@@ -120,76 +121,426 @@ def _finite(x: float) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _nan_hit(name: str, where: str, detail: str, fix: str, **extra: Any) -> dict:
+    return {
+        "name": name,
+        "triggered": True,
+        "where": where,
+        "detail": detail,
+        "fix": fix,
+        **extra,
+    }
+
+
+def _nan_ok(name: str, detail: str, fix: str, **extra: Any) -> dict:
+    return {
+        "name": name,
+        "triggered": False,
+        "where": None,
+        "detail": detail,
+        "fix": fix,
+        **extra,
+    }
+
+
+def _recipe_fp16_overflow(device: torch.device) -> dict:
+    """FP16 weights + huge LR, no GradScaler."""
+    torch.manual_seed(0)
+    model = _mlp(32, 5).to(device).half()
+    opt = torch.optim.SGD(model.parameters(), lr=50.0)
+    for step in range(20):
+        x = torch.randn(16, 32, device=device, dtype=torch.float16)
+        y = torch.randint(0, 5, (16,), device=device)
+        opt.zero_grad(set_to_none=True)
+        loss = F.cross_entropy(model(x).float(), y)
+        v = float(loss.detach().cpu())
+        if not _finite(v):
+            return _nan_hit(
+                "fp16_overflow",
+                "loss",
+                f"non-finite loss at step {step} (value={v})",
+                "FP32 master weights + GradScaler / lower LR / grad clip",
+                first_step=step,
+            )
+        loss.backward()
+        if any(p.grad is not None and not torch.isfinite(p.grad).all() for p in model.parameters()):
+            return _nan_hit(
+                "fp16_overflow",
+                "grad",
+                f"non-finite grad at step {step}",
+                "FP32 master weights + GradScaler / lower LR / grad clip",
+                first_step=step,
+            )
+        opt.step()
+    return _nan_ok("fp16_overflow", "unexpectedly stayed finite", "GradScaler + lower LR")
+
+
+def _recipe_huge_lr_fp32(device: torch.device) -> dict:
+    """Even FP32 blows up with an absurd LR (no AMP involved)."""
+    torch.manual_seed(0)
+    model = _mlp(32, 5).to(device)
+    opt = torch.optim.SGD(model.parameters(), lr=1e3)
+    for step in range(30):
+        x = torch.randn(16, 32, device=device)
+        y = torch.randint(0, 5, (16,), device=device)
+        opt.zero_grad(set_to_none=True)
+        loss = F.cross_entropy(model(x), y)
+        v = float(loss.detach().cpu())
+        if not _finite(v):
+            return _nan_hit(
+                "huge_lr_fp32",
+                "loss",
+                f"non-finite loss at step {step}",
+                "LR warmup / smaller LR / grad clip; LR bugs are not AMP-only",
+                first_step=step,
+            )
+        loss.backward()
+        opt.step()
+        if any(not torch.isfinite(p).all() for p in model.parameters()):
+            return _nan_hit(
+                "huge_lr_fp32",
+                "param",
+                f"non-finite params after step {step}",
+                "LR warmup / smaller LR / grad clip; LR bugs are not AMP-only",
+                first_step=step,
+            )
+    return _nan_ok("huge_lr_fp32", "unexpectedly stayed finite", "lower LR")
+
+
+def _recipe_nan_in_inputs(device: torch.device) -> dict:
+    """Corrupt shard already contains NaN features."""
+    torch.manual_seed(0)
+    model = _mlp(32, 5).to(device)
+    x = torch.randn(16, 32, device=device)
+    x[0, 0] = float("nan")
+    y = torch.randint(0, 5, (16,), device=device)
+    loss = F.cross_entropy(model(x), y)
+    v = float(loss.detach().cpu())
+    if not _finite(v) or not torch.isfinite(model(x)).all():
+        return _nan_hit(
+            "nan_in_inputs",
+            "loss",
+            f"NaN in batch → loss={v}",
+            "assert isfinite(batch) in dataloader; quarantine corrupt shards",
+            first_step=0,
+        )
+    return _nan_ok("nan_in_inputs", "model somehow absorbed NaN inputs", "validate inputs")
+
+
+def _recipe_fp16_matmul_overflow(device: torch.device) -> dict:
+    """FP16 GEMM overflows to Inf (common when activations grow under AMP)."""
+    torch.manual_seed(0)
+    a = torch.randn(128, 128, device=device, dtype=torch.float16) * 60
+    b = torch.randn(128, 128, device=device, dtype=torch.float16) * 60
+    c = a @ b
+    c32 = a.float() @ b.float()
+    if not torch.isfinite(c).all():
+        return _nan_hit(
+            "fp16_matmul_overflow",
+            "activation",
+            f"fp16 GEMM nonfinite={(~torch.isfinite(c)).sum().item()} "
+            f"max={float(c.float().abs().max())}; fp32 max={float(c32.abs().max()):.3g}",
+            "loss scaling / lower activation scale / BF16 where available",
+            first_step=0,
+            fp32_finite=bool(torch.isfinite(c32).all()),
+        )
+    return _nan_ok("fp16_matmul_overflow", "fp16 GEMM stayed finite", "GradScaler / BF16")
+
+
+def _recipe_unscaled_attention(device: torch.device) -> dict:
+    """Two attention NaNs: fully-masked softmax row, and fp16 score overflow."""
+    # (1) All positions masked → softmax(-inf,...,-inf) = NaN.
+    masked = torch.full((2, 8), float("-inf"), device=device)
+    w_masked = torch.softmax(masked, dim=-1)
+    # (2) FP16 scores overflow to Inf; stable softmax does Inf-Inf → NaN.
+    torch.manual_seed(0)
+    d = 64
+    q = torch.randn(2, 16, d, device=device, dtype=torch.float16) * 40
+    k = torch.randn(2, 16, d, device=device, dtype=torch.float16) * 40
+    scores16 = q @ k.transpose(-1, -2)
+    w16 = torch.softmax(scores16, dim=-1)
+    scores_ok = (q.float() @ k.float().transpose(-1, -2)) / (d**0.5)
+    w_ok = torch.softmax(scores_ok, dim=-1)
+    triggered = (not torch.isfinite(w_masked).all()) or (not torch.isfinite(w16).all())
+    if triggered:
+        return _nan_hit(
+            "attention_softmax_nan",
+            "softmax",
+            f"all_masked_finite={bool(torch.isfinite(w_masked).all())} "
+            f"fp16_scores_finite={bool(torch.isfinite(scores16).all())} "
+            f"fp16_softmax_finite={bool(torch.isfinite(w16).all())}",
+            "scale 1/sqrt(d); never fully-mask a row; use SDPA / fused attn",
+            first_step=0,
+            fixed_scaled_fp32_finite=bool(torch.isfinite(w_ok).all()),
+        )
+    return _nan_ok("attention_softmax_nan", "attention recipes stayed finite", "scale + valid masks")
+
+
+def _recipe_masked_nll_zero_times_neginf(device: torch.device) -> dict:
+    """Classic mask bug: (mask * log_softmax).sum() with 0 * (-inf) → NaN."""
+    torch.manual_seed(0)
+    logits = torch.tensor([[100.0, -100.0], [100.0, -100.0]], device=device)
+    # Position 1 is fully masked (pad); broken code still indexes it.
+    log_probs = F.log_softmax(logits, dim=-1)
+    # Force a -inf entry like a hard mask on logits before log_softmax.
+    hard = logits.clone()
+    hard[1, :] = float("-inf")  # all-masked row
+    log_probs_bad = F.log_softmax(hard, dim=-1)
+    mask = torch.tensor([1.0, 0.0], device=device)
+    # Broken reduction used in many toy CE implementations:
+    broken = (mask[:, None] * log_probs_bad).sum()
+    # Also the 0 * -inf pattern directly:
+    direct = torch.tensor(0.0, device=device) * torch.tensor(float("-inf"), device=device)
+    # Fixed: masked_fill / ignore_index / nll_loss
+    fixed = F.cross_entropy(
+        logits,
+        torch.tensor([0, 0], device=device),
+        reduction="none",
+    )
+    fixed = (fixed * mask).sum() / mask.sum()
+    triggered = (not torch.isfinite(log_probs_bad).all()) or (not torch.isfinite(broken)) or (
+        not torch.isfinite(direct)
+    )
+    if triggered:
+        return _nan_hit(
+            "masked_nll_zero_neg_inf",
+            "loss",
+            f"0*(-inf)={float(direct)} broken_sum finite={bool(torch.isfinite(broken))} "
+            f"allmasked_log_softmax finite={bool(torch.isfinite(log_probs_bad).all())}",
+            "use ignore_index / masked_fill before softmax / sum only valid positions",
+            first_step=0,
+            fixed_finite=bool(torch.isfinite(fixed)),
+            log_probs_finite=bool(torch.isfinite(log_probs).all()),
+        )
+    return _nan_ok("masked_nll_zero_neg_inf", "mask recipe did not NaN", "ignore_index")
+
+
+def _recipe_div_by_zero_normalize(device: torch.device) -> dict:
+    """Normalize losses / embeddings by a count that can be zero (empty batch shard)."""
+    weights = torch.zeros(8, device=device)  # all padding
+    values = torch.randn(8, device=device)
+    broken = values.sum() / weights.sum()  # 0/0 → NaN
+    fixed = values.sum() / weights.sum().clamp(min=1.0)
+    if not torch.isfinite(broken):
+        return _nan_hit(
+            "div_by_zero_normalize",
+            "loss",
+            f"sum/count with count=0 → {float(broken)}",
+            "clamp denominators; skip empty ranks; use mean over valid only",
+            first_step=0,
+            fixed_finite=bool(torch.isfinite(fixed)),
+        )
+    return _nan_ok("div_by_zero_normalize", "unexpectedly finite", "clamp denominator")
+
+
+def _recipe_log_of_zero_prob(device: torch.device) -> dict:
+    """BCE / custom NLL takes log(prob) when prob underflows to 0."""
+    probs = torch.tensor([1e-45, 1.0], device=device).float()
+    # Underflow to 0 in float32 for very small values depending on platform;
+    # force an exact zero.
+    probs = torch.tensor([0.0, 1.0], device=device)
+    broken = torch.log(probs).mean()
+    fixed = torch.log(probs.clamp(min=1e-8)).mean()
+    if not torch.isfinite(broken):
+        return _nan_hit(
+            "log_of_zero",
+            "loss",
+            f"log(0)={float(torch.log(probs)[0])}",
+            "log(clamp(p, min=eps)); prefer logits + BCEWithLogits / cross_entropy",
+            first_step=0,
+            fixed_finite=bool(torch.isfinite(fixed)),
+        )
+    return _nan_ok("log_of_zero", "log(0) did not produce NaN/Inf here", "clamp + logits APIs")
+
+
+def _recipe_soft_label_ce(device: torch.device) -> dict:
+    """Soft CE with a zero probability class: target * log(softmax) → 0*(-inf) risk."""
+    torch.manual_seed(0)
+    logits = torch.tensor([[50.0, -50.0]], device=device)
+    # Soft label puts mass only on class 0; class 1 has target 0 against log≈-inf.
+    target = torch.tensor([[1.0, 0.0]], device=device)
+    log_p = F.log_softmax(logits, dim=-1)
+    broken = -(target * log_p).sum()  # usually fine when target is exact 0 * large_neg
+    # Make it fail: target has tiny epsilon then underflows, or use hard -inf logits
+    logits2 = torch.tensor([[0.0, float("-inf")]], device=device)
+    log_p2 = F.log_softmax(logits2, dim=-1)
+    target2 = torch.tensor([[0.5, 0.5]], device=device)  # illegal mass on -inf class
+    broken2 = -(target2 * log_p2).sum()
+    fixed = F.cross_entropy(logits, torch.tensor([0], device=device))
+    if not torch.isfinite(log_p2).all() or not torch.isfinite(broken2):
+        return _nan_hit(
+            "soft_label_vs_neg_inf_logit",
+            "loss",
+            f"soft label on -inf logit → {float(broken2)}; log_softmax finite="
+            f"{bool(torch.isfinite(log_p2).all())}",
+            "forbid -inf logits under soft labels; mask classes; use label smoothing carefully",
+            first_step=0,
+            hard_ce_finite=bool(torch.isfinite(broken) and torch.isfinite(fixed)),
+        )
+    return _nan_ok("soft_label_vs_neg_inf_logit", "did not NaN", "validate soft targets")
+
+
+def _recipe_optimizer_nan_moment(device: torch.device) -> dict:
+    """One NaN grad poisons Adam moments forever after."""
+    torch.manual_seed(0)
+    model = nn.Linear(8, 4).to(device)
+    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    x = torch.randn(4, 8, device=device)
+    y = torch.randint(0, 4, (4,), device=device)
+    # Normal step
+    opt.zero_grad(set_to_none=True)
+    F.cross_entropy(model(x), y).backward()
+    opt.step()
+    # Inject NaN grad once
+    opt.zero_grad(set_to_none=True)
+    F.cross_entropy(model(x), y).backward()
+    for p in model.parameters():
+        if p.grad is not None:
+            p.grad.reshape(-1)[0] = float("nan")
+            break
+    opt.step()
+    moment_nan = False
+    for st in opt.state.values():
+        for k in ("exp_avg", "exp_avg_sq"):
+            if k in st and not torch.isfinite(st[k]).all():
+                moment_nan = True
+    # Next step even with clean grads keeps NaN params
+    opt.zero_grad(set_to_none=True)
+    loss = F.cross_entropy(model(x), y)
+    loss.backward()
+    opt.step()
+    param_nan = any(not torch.isfinite(p).all() for p in model.parameters())
+    if moment_nan or param_nan:
+        return _nan_hit(
+            "adam_moment_poison",
+            "optimizer_state",
+            f"moment_nan={moment_nan} param_nan={param_nan}",
+            "skip optimizer.step on non-finite grads; reset Adam state after incident",
+            first_step=1,
+        )
+    return _nan_ok("adam_moment_poison", "Adam absorbed NaN grad", "skip non-finite steps")
+
+
+def _recipe_ddp_nan_contagion(rank: int, model: nn.Module, device: torch.device) -> dict:
+    """One rank injects NaN grads → allreduce spreads them to every replica."""
+    ddp = nn.parallel.DistributedDataParallel(model)
+    opt = torch.optim.SGD(ddp.parameters(), lr=0.1)
+    x = torch.randn(8, 32, device=device)
+    y = torch.randint(0, 5, (8,), device=device)
+    opt.zero_grad(set_to_none=True)
+    loss = F.cross_entropy(ddp(x), y)
+    loss.backward()
+    # After DDP's autograd hook allreduced grads, mutate local grad on rank 0 only —
+    # too late for this backward. Instead: inject BEFORE backward finishes by
+    # registering a hook on a parameter that runs pre-allreduce... Simplest demo:
+    # rank0 replaces a param with NaN, then next forward/backward contaminates.
+    if rank == 0:
+        with torch.no_grad():
+            for p in model.parameters():
+                p.reshape(-1)[0] = float("nan")
+                break
+    # Broadcast-free: next backward allreduces grads computed from NaN params on rank0
+    # and finite on others — average still NaN.
+    opt.zero_grad(set_to_none=True)
+    loss2 = F.cross_entropy(ddp(x), y)
+    loss2.backward()
+    grad_nan_local = any(
+        p.grad is not None and not torch.isfinite(p.grad).all() for p in model.parameters()
+    )
+    flag = torch.tensor([1.0 if grad_nan_local else 0.0], device=device)
+    dist.all_reduce(flag, op=dist.ReduceOp.SUM)
+    ranks_with_nan = int(flag.item())
+    if grad_nan_local:
+        return _nan_hit(
+            "ddp_nan_contagion",
+            "grad",
+            f"ranks_with_nan_grad={ranks_with_nan}/{dist.get_world_size()}",
+            "detect isfinite per rank before step; quarantine offending rank/batch",
+            first_step=1,
+            ranks_with_nan_grad=ranks_with_nan,
+        )
+    return _nan_ok(
+        "ddp_nan_contagion",
+        f"no local NaN grad (ranks_with_nan={ranks_with_nan})",
+        "assert isfinite before allreduce consumers",
+    )
+
+
 def case_nan(rank: int, world_size: int, backend: str, port: int) -> dict:
-    """FP16 forward with huge LR and no grad scaling → NaNs appear fast."""
+    """Catalog of common NaN/Inf failure modes (data, numerics, masks, DDP)."""
     _init_pg(rank, world_size, backend, port)
     device = _device(rank, backend)
     if device.type == "cuda":
         torch.cuda.set_device(device)
 
-    torch.manual_seed(0)
-    model = _mlp(32, 5).to(device)
-    # Intentionally fragile: fp16 weights + huge LR, no GradScaler.
-    model = model.half()
-    ddp = nn.parallel.DistributedDataParallel(model)
-    opt = torch.optim.SGD(ddp.parameters(), lr=50.0)
+    recipes = [
+        _recipe_fp16_overflow(device),
+        _recipe_huge_lr_fp32(device),
+        _recipe_nan_in_inputs(device),
+        _recipe_fp16_matmul_overflow(device),
+        _recipe_unscaled_attention(device),
+        _recipe_masked_nll_zero_times_neginf(device),
+        _recipe_div_by_zero_normalize(device),
+        _recipe_log_of_zero_prob(device),
+        _recipe_soft_label_ce(device),
+        _recipe_optimizer_nan_moment(device),
+    ]
 
-    losses: list[float] = []
-    first_nan_step: int | None = None
-    for step in range(40):
-        x = torch.randn(16, 32, device=device, dtype=torch.float16)
-        y = torch.randint(0, 5, (16,), device=device)
-        opt.zero_grad(set_to_none=True)
-        logits = ddp(x)
-        loss = F.cross_entropy(logits.float(), y)
-        loss_v = float(loss.detach().cpu())
-        losses.append(loss_v)
-        if first_nan_step is None and not _finite(loss_v):
-            first_nan_step = step
-        if not _finite(loss_v):
-            break
-        loss.backward()
-        # Detect NaN grads before step (debug signal).
-        grad_nan = any(
-            p.grad is not None and not torch.isfinite(p.grad).all() for p in model.parameters()
-        )
-        if grad_nan and first_nan_step is None:
-            first_nan_step = step
-            break
-        opt.step()
-
-    # Healthy control: keep FP16 compute but master weights in FP32 + small LR + clip.
+    # DDP contagion needs the process group (already init).
     torch.manual_seed(0)
-    model_ok = _mlp(32, 5).to(device)  # fp32 master weights
+    contagion_model = _mlp(32, 5).to(device)
+    recipes.append(_recipe_ddp_nan_contagion(rank, contagion_model, device))
+
+    # Healthy control: fp32 + mild LR + clip.
+    torch.manual_seed(0)
+    model_ok = _mlp(32, 5).to(device)
     ddp_ok = nn.parallel.DistributedDataParallel(model_ok)
     opt_ok = torch.optim.SGD(ddp_ok.parameters(), lr=0.05)
     losses_ok: list[float] = []
-    for _step in range(40):
+    for _step in range(20):
         x = torch.randn(16, 32, device=device)
         y = torch.randint(0, 5, (16,), device=device)
         opt_ok.zero_grad(set_to_none=True)
-        if device.type == "cuda":
-            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-                loss = F.cross_entropy(ddp_ok(x), y)
-            loss.backward()
-        else:
-            loss = F.cross_entropy(ddp_ok(x), y)
-            loss.backward()
+        loss = F.cross_entropy(ddp_ok(x), y)
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(ddp_ok.parameters(), 1.0)
         opt_ok.step()
         losses_ok.append(float(loss.detach().float().cpu()))
+
+    triggered = [r for r in recipes if r["triggered"]]
+    # Keep a short fp16 loss curve for the existing figure.
+    fp16 = next(r for r in recipes if r["name"] == "fp16_overflow")
+    broken_losses = []
+    torch.manual_seed(0)
+    model = _mlp(32, 5).to(device).half()
+    opt = torch.optim.SGD(model.parameters(), lr=50.0)
+    for _step in range(12):
+        x = torch.randn(16, 32, device=device, dtype=torch.float16)
+        y = torch.randint(0, 5, (16,), device=device)
+        opt.zero_grad(set_to_none=True)
+        loss = F.cross_entropy(model(x).float(), y)
+        v = float(loss.detach().cpu())
+        broken_losses.append(v)
+        if not _finite(v):
+            break
+        loss.backward()
+        opt.step()
 
     out = {
         "case": "nan",
         "rank": rank,
         "backend": backend,
         "device": str(device),
-        "broken_losses": losses,
-        "first_nan_step": first_nan_step,
-        "nan_detected": first_nan_step is not None,
+        "recipes": recipes,
+        "n_recipes": len(recipes),
+        "n_triggered": len(triggered),
+        "triggered_names": [r["name"] for r in triggered],
+        "nan_detected": len(triggered) > 0,
+        "first_nan_step": fp16.get("first_step"),
+        "broken_losses": broken_losses,
         "healthy_losses": losses_ok,
         "healthy_all_finite": all(_finite(v) for v in losses_ok),
-        "fix": "fp32 master weights / GradScaler / lower LR / grad clip; assert isfinite",
+        "fix": "catalog: validate inputs, scale attn, clamp denoms, skip non-finite Adam steps",
     }
     dist.destroy_process_group()
     return out
@@ -740,6 +1091,9 @@ def run_case(
         for key in (
             "nan_detected",
             "first_nan_step",
+            "n_triggered",
+            "triggered_names",
+            "n_recipes",
             "detected",
             "drift_detected",
             "leak_detected",
@@ -820,7 +1174,11 @@ def _print_summary(results: dict) -> None:
     for name, c in results.get("cases", {}).items():
         p = c.get("primary", {})
         if name == "nan":
-            print(f"  nan: detected={p.get('nan_detected')} first_step={p.get('first_nan_step')}")
+            print(
+                f"  nan: detected={p.get('nan_detected')} "
+                f"{p.get('n_triggered')}/{p.get('n_recipes')} recipes → "
+                f"{p.get('triggered_names')}"
+            )
         elif name == "loss_spike":
             print(f"  loss_spike: detected={p.get('detected')} ratios={p.get('spike_ratio_vs_median')}")
         elif name == "numerical_drift":
