@@ -11,8 +11,8 @@ cover:
 ---
 
 # The GPU Optimization Playbook: Architecture, Memory, and Balance
-
 Most "GPU optimization" advice is a bag of tricks: coalesce here, unroll there, add `__restrict__` and pray. Tricks are the *output* of optimization, not the method. The method is smaller and more durable: understand the machine, find the resource that is actually saturated, and rebalance work toward the resources that are idle. **Almost every GPU kernel is limited by data movement, not arithmetic.** Once you internalize that, the whole catalog of techniques collapses into three questions.
+
 
 ## TL;DR
 
@@ -71,7 +71,7 @@ That reframing is what turns a pile of tricks into three questions you can ask a
 2. **Irregularity** — is divergent or scattered work forcing the warp to do redundant or serialized work?
 3. **Balance** — am I matching the amount of work per thread to the registers, bandwidth, and parallelism I actually have?
 
-The rest of the post walks these three pillars.
+This grouping follows Hijma et al.'s survey [*Optimization Techniques for GPU Programming*](https://dl.acm.org/doi/10.1145/3570638) (ACM Computing Surveys, 2023), which distilled 28 techniques from 450 papers and found them **highly interrelated** — which is exactly why auto-tuning matters and why no single trick is a silver bullet. The rest of the post walks these three pillars.
 
 ## 4. Pillar 1 — Memory Access
 
@@ -182,4 +182,11 @@ The catalog above is a menu, not an itinerary. Ordering matters more than comple
 3. **Reach for libraries before PTX.** For the overwhelming majority of workloads, `torch.compile`, FlashAttention, cuBLAS, and CUTLASS already encode more of this playbook than you will hand-write. Custom kernels earn their keep only where a profiler proves a real, fusible gap.
 
 The three questions — *is data close? is work regular? is it balanced?* — are enough to reason about almost any kernel without memorizing the trick list. The tricks are just the answers.
+
+
+## References
+
+- Hijma, Heldens, Sclocco, van Werkhoven, Bal, [Optimization Techniques for GPU Programming](https://dl.acm.org/doi/10.1145/3570638), ACM Computing Surveys 55(11), Article 239, 2023 — the 450-paper survey behind this post's three-pillar taxonomy.
+- Williams, Waterman, Patterson, [Roofline](https://dl.acm.org/doi/10.1145/1498765.1498785), CACM 2009; NVIDIA [CUDA C++ Programming Guide](https://docs.nvidia.com/cuda/cuda-c-programming-guide/) and [DL Performance Guide](https://docs.nvidia.com/deeplearning/performance/index.html)
+- Dao et al., [FlashAttention](https://arxiv.org/abs/2205.14135); Horace He, [Making Deep Learning Go Brrrr](https://horace.io/brrr_intro.html)
 
