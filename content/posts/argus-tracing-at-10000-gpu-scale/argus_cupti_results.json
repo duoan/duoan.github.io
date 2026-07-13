@@ -1,0 +1,115 @@
+{
+  "device": "NVIDIA A10",
+  "cupti": {
+    "api": "CUPTI Activity API",
+    "kind": "CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL",
+    "kernel_struct": "CUpti_ActivityKernel9",
+    "build": {
+      "kernel_struct": "CUpti_ActivityKernel9",
+      "so": "/tmp/libargus_cupti_tracer.so",
+      "cmd": [
+        "g++",
+        "-shared",
+        "-fPIC",
+        "-O2",
+        "-DARGUS_KERNEL_T=CUpti_ActivityKernel9",
+        "-I/usr/local/cuda/include",
+        "/root/argus_cupti_tracer.cpp",
+        "-L/usr/local/cuda/lib64",
+        "-lcupti",
+        "-Wl,-rpath,/usr/local/cuda/lib64",
+        "-o",
+        "/tmp/libargus_cupti_tracer.so"
+      ]
+    },
+    "records_in_overhead_window": 12800,
+    "records_in_straggler_window": 4800,
+    "top_kernels": [
+      {
+        "name": "ampere_bf16_s16816gemm_bf16_256x128_ldg8_relu_f2f_stages_32x3_tn",
+        "count": 720
+      },
+      {
+        "name": "_ZN2at6native29vectorized_elementwise_kernelILi4EZZZNS0_18GeluCUDAKernelImplERNS_18TensorIteratorBaseENS0_8GeluTypeEENKUlvE0_cl",
+        "count": 720
+      },
+      {
+        "name": "_ZN2at6native29vectorized_elementwise_kernelILi4EZZZNS0_26GeluBackwardCUDAKernelImplERNS_18TensorIteratorBaseENS0_8GeluTypeEENK",
+        "count": 720
+      },
+      {
+        "name": "_ZN7cutlass7Kernel2I67cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_64x64_32x10_nt_align8EEvNT_6ParamsE",
+        "count": 720
+      },
+      {
+        "name": "_ZN2at6native13reduce_kernelILi128ELi4ENS0_8ReduceOpIN3c108BFloat16ENS0_14func_wrapper_tIS4_ZNS0_11sum_functorIS4_fS4_EclERNS_1",
+        "count": 720
+      },
+      {
+        "name": "ampere_bf16_s1688gemm_bf16_128x128_ldg8_f2f_stages_32x1_nn",
+        "count": 690
+      },
+      {
+        "name": "_ZN2at6native57_GLOBAL__N__7e105b8f_24_ForeachBinaryOpScalar_cu_86b9896c25multi_tensor_apply_kernelINS1_18TensorListMetadataILi",
+        "count": 90
+      },
+      {
+        "name": "_ZN2at6native53_GLOBAL__N__4da244e1_20_layer_norm_kernel_cu_9c5ada8a28vectorized_layer_norm_kernelIN3c108BFloat16EfLb0EEEviT0_P",
+        "count": 30
+      },
+      {
+        "name": "_ZN2at6native29vectorized_elementwise_kernelILi4EZNS0_51_GLOBAL__N__7b48bba2_12_PowKernel_cu_2f7922d3_2269929pow_tensor_scalar_",
+        "count": 30
+      },
+      {
+        "name": "_ZN2at6native13reduce_kernelILi512ELi1ENS0_8ReduceOpIN3c108BFloat16ENS0_7MeanOpsIS4_ffS4_EEjS4_Li4ELi8EEEEEvT1_",
+        "count": 30
+      },
+      {
+        "name": "_ZN2at6native29vectorized_elementwise_kernelILi4ENS0_11FillFunctorIN3c108BFloat16EEESt5arrayIPcLm1EEEEviT0_T1_",
+        "count": 30
+      },
+      {
+        "name": "_ZN2at6native18elementwise_kernelILi128ELi4EZNS0_22gpu_kernel_impl_nocastINS0_13BUnaryFunctorIN3c108BFloat16ES5_S5_NS0_15binary",
+        "count": 30
+      }
+    ]
+  },
+  "overhead": {
+    "warmup": 20,
+    "steps": 80,
+    "baseline_median_ms": 3.897644999597105,
+    "cupti_median_ms": 4.321934000472538,
+    "cupti_overhead_pct": 10.885778487247833,
+    "cupti_plus_semantics_median_ms": 4.417432000991539,
+    "cupti_plus_semantics_overhead_pct": 13.335924678829493,
+    "rss_delta_mb_cupti_window": 19.1640625
+  },
+  "l3_from_cupti": {
+    "target_kernel": "gemm",
+    "target_stream": 7,
+    "n_ranks": 8,
+    "simulated_straggler": 5,
+    "slow_factor": 2.8,
+    "w1_deviation_scores": [
+      0.005550897532839697,
+      0.005540255228409674,
+      0.0055394292116993284,
+      0.0055591935129680565,
+      0.005540906174617231,
+      0.03858607631815853,
+      0.0055493063527565795,
+      0.005536931016149936
+    ],
+    "flagged_ranks": [
+      5
+    ],
+    "compression_mean_ratio": 272.54901960784315,
+    "detected": true
+  },
+  "channels": {
+    "cpu_stacks": "not in this demo (py-spy; host-side)",
+    "framework_semantics": "CUDA Events on fwd/bwd/opt (overhead combo)",
+    "gpu_kernels": "CUPTI Activity API CONCURRENT_KERNEL (this file)"
+  }
+}

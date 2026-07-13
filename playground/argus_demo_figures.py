@@ -366,6 +366,56 @@ def case_figures(cases: dict, out: Path) -> None:
     plt.close(fig)
 
 
+def cupti_figures(cupti: dict, out: Path) -> None:
+    """Overhead bars + top kernel counts from the CUPTI Activity demo."""
+    oh = cupti["overhead"]
+    tops = cupti["cupti"]["top_kernels"][:8]
+
+    fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.4))
+    ax = axes[0]
+    labels = ["baseline", "CUPTI\nActivity", "CUPTI +\nsemantics"]
+    vals = [
+        0.0,
+        oh["cupti_overhead_pct"],
+        oh["cupti_plus_semantics_overhead_pct"],
+    ]
+    colors = ["#94a3b8", "#2563eb", "#55A868"]
+    bars = ax.bar(labels, vals, color=colors, edgecolor="white", width=0.7)
+    ax.set_ylabel("step-time overhead vs baseline (%)")
+    ax.set_title("CUPTI Activity API always-on tax")
+    for bar, val in zip(bars, vals, strict=False):
+        ax.text(
+            bar.get_x() + bar.get_width() / 2,
+            bar.get_height() + 0.3,
+            f"{val:+.1f}%",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
+
+    ax = axes[1]
+    names = []
+    for t in tops:
+        n = t["name"]
+        if len(n) > 28:
+            n = n[:14] + "…" + n[-10:]
+        names.append(n)
+    counts = [t["count"] for t in tops]
+    ax.barh(names[::-1], counts[::-1], color="#4C72B0")
+    ax.set_xlabel("records in collection window")
+    ax.set_title(
+        f"Top CUPTI kernels ({cupti['cupti']['records_in_straggler_window']} total)"
+    )
+    fig.suptitle(
+        f"{cupti.get('device', '')} · {cupti['cupti'].get('kernel_struct', '')}",
+        fontsize=11,
+        y=1.02,
+    )
+    fig.tight_layout()
+    fig.savefig(out / "cupti_activity.svg", bbox_inches="tight")
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--results", type=Path, default=Path("playground/argus_demo_results.json"))
@@ -379,6 +429,11 @@ def main() -> None:
         type=Path,
         default=Path("playground/argus_cases_results.json"),
     )
+    parser.add_argument(
+        "--cupti",
+        type=Path,
+        default=Path("playground/argus_cupti_results.json"),
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
@@ -386,6 +441,7 @@ def main() -> None:
     results = json.loads(args.results.read_text()) if args.results.exists() else None
     overhead = json.loads(args.overhead.read_text()) if args.overhead.exists() else None
     cases = json.loads(args.cases.read_text()) if args.cases.exists() else None
+    cupti = json.loads(args.cupti.read_text()) if args.cupti.exists() else None
 
     architecture_figure(args.out)
     progressive_diagnosis_figure(args.out)
@@ -400,6 +456,9 @@ def main() -> None:
 
     if cases:
         case_figures(cases, args.out)
+
+    if cupti:
+        cupti_figures(cupti, args.out)
 
     print(f"Wrote figures to {args.out}")
 

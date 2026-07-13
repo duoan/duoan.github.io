@@ -12,7 +12,7 @@ cover:
 
 # Paper Reading: ARGUS — Always-On Tracing at 10,000+ GPU Scale
 
-What Tencent built to catch fail-slow training jobs on 10k+ GPU clusters with under 2% overhead — plus Modal remasurements of always-on `torch.profiler` / `nsys` overhead and a tiny demo of the KDE + W₁ detection math.
+What Tencent built to catch fail-slow training jobs on 10k+ GPU clusters with under 2% overhead — plus Modal remasurements of CUPTI Activity API / `torch.profiler` / `nsys` overhead, case-study reproductions, and the KDE + W₁ detection path.
 
 **Paper:** [ARGUS: Production-Scale Tracing and Performance Diagnosis for over 10,000-GPU Clusters](https://arxiv.org/abs/2606.20374) (Zhou et al., Tencent, arXiv 2606.20374, submitted to ATC 2026)
 
@@ -69,15 +69,15 @@ Modern training spans three layers (Figure 2 in the paper):
 
 ARGUS instruments each layer with a **different tool**, not one mega-profiler:
 
-| Signal | Mechanism | Overhead (paper) |
-|---|---|---|
-| CPU call stacks | py-spy external sampling, streaming snapshots | negligible |
-| Framework semantics | CUDA Events at phase boundaries; correct NCCL stream selection | negligible |
-| Kernel activity | CUPTI Activity API via `libcupti_injector.so` + env injection | ~1–2% |
+| Signal | Mechanism | Overhead (paper) | Our demo |
+|---|---|---|---|
+| CPU call stacks | py-spy external sampling, streaming snapshots | negligible | not yet (host-side; deferred) |
+| Framework semantics | CUDA Events at phase boundaries; correct NCCL stream selection | negligible | **yes** — `argus_overhead_modal.py` / CUPTI combo |
+| Kernel activity | CUPTI Activity API via `libcupti_injector.so` + env injection | ~1–2% | **yes** — real CUPTI Activity API in `argus_cupti_modal.py` |
 
 **Semantics detail worth remembering:** communication phases must record events on the **actual NCCL stream**, not the default compute stream. Putting events on the wrong stream makes AllReduce look instant while the GPU was still busy elsewhere.
 
-**CUPTI detail:** three decoupled paths — control, lightweight callback enqueue, async parse/export — plus selective injection (skip launcher/compile workers), pre-allocated buffer pools, and bounded queues with backpressure.
+**CUPTI detail:** three decoupled paths — control, lightweight callback enqueue, async parse/export — plus selective injection (skip launcher/compile workers), pre-allocated buffer pools, and bounded queues with backpressure. Our Modal demo compiles a small `libargus_cupti_tracer.so`, enables `CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL`, and streams `(name, streamId, duration)` into the same KDE/W₁ pipeline. It is **not** their production injector (no `CUDA_INJECTION64_PATH`, no async Processor, no selective process filter) — so expect higher overhead than the paper’s <2%.
 
 ### Data pipeline (§5)
 
@@ -181,7 +181,36 @@ What this remasurement supports:
 2. **`torch.profiler` is not always-on-safe** once you ask for useful fidelity — CUDA-only already costs ~36% here and grows RSS; full CPU+stack mode more than doubles step time and piles up ~3 GB in 200 steps.
 3. **`nsys` always-on is also expensive** (~56% step-time tax on this single-GPU loop). We did **not** reproduce the paper’s multi-GPU hang/NaN — that failure mode is about distributed NCCL/AllToAll under nsys, which this microbench does not exercise.
 
-Caveat: this is **not** a full ARGUS CUPTI injector + streaming Processor. We only remasured the *competitor* always-on tax and an ARGUS-**style** semantics probe. The paper’s <2% combined figure still includes their engineered CUPTI path (pre-allocated buffers, async export, selective injection), which we do not reimplement.
+### CUPTI Activity API remasurement (the missing third channel)
+
+Earlier demos timed ops with **CUDA Events**. That is fine for semantics, but it is **not** ARGUS §4.3. We now compile and run a real CUPTI Activity collector on Modal:
+
+```bash
+uv run modal run playground/argus_cupti_modal.py
+```
+
+Sources: [`playground/argus_cupti_tracer.cpp`](https://github.com/duoan/duoan.github.io/blob/main/playground/argus_cupti_tracer.cpp) · [`playground/argus_cupti_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/argus_cupti_modal.py)
+
+What it does:
+
+1. Build `libargus_cupti_tracer.so` against the image’s CUPTI (`CUpti_ActivityKernel9` on CUDA 12.4).
+2. `cuptiActivityRegisterCallbacks` + `cuptiActivityEnable(CONCURRENT_KERNEL)`.
+3. Run a launch-heavy MLP; flush; read `(name, streamId, duration_ms)` records.
+4. Feed those records into the same KDE compression + W₁ L3 detector (simulate 8 ranks, slow rank 5’s `gemm` family).
+
+Modal **A10** results ([argus_cupti_results.json](./argus_cupti_results.json)):
+
+| Metric | Value |
+|---|---|
+| CUPTI records / 80-step window | **12,800** |
+| Top kernel | `ampere_bf16_s16816gemm_…` (720 hits) |
+| CUPTI always-on overhead | **+10.9%** step time |
+| CUPTI + semantics | **+13.3%** |
+| L3 from real CUPTI names | flagged **[5]**, compression **~273×** |
+
+![CUPTI Activity API overhead and top kernels](./cupti_activity.svg)
+
+Why our CUPTI tax (~11%) is higher than ARGUS’s claimed ~1–2%: we keep records in-process, flush synchronously, and skip their pre-allocated buffer pool / async Processor / selective injection / backpressure path. The point of this demo is **API fidelity** (real Activity records → compress → detect), not matching production overhead engineering.
 
 ## Case Studies — What Actually Breaks at Scale
 
@@ -311,7 +340,12 @@ We did not wire a full EP=32 schedule on one Modal GPU — the detection insight
 
 ## Mini Experiment: KDE + W₁ on a Simulated Straggler
 
-The full ARGUS stack needs CUPTI injection, Vector, Grafana, and thousands of ranks. We can still reproduce the **statistical core** in a few hundred lines.
+Two paths into the same statistical core:
+
+1. **CUDA Event timings** (`argus_demo_modal.py`) — quick, no CUPTI link needed.
+2. **Real CUPTI Activity records** (`argus_cupti_modal.py`) — the ARGUS §4.3 channel; see above.
+
+Both compress with KDE and run L3 W₁ detection.
 
 Code: [`playground/argus_demo_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/argus_demo_modal.py)
 
@@ -363,7 +397,7 @@ uv run python playground/argus_demo_figures.py \
 | Cluster fail-slow monitors ([Greyhound](#references), [Holmes](#references), [C4](#references), …) | yes | no (machine / link / phase) | low |
 | Training-job tracers ([MegaScale](#references), [EROICA](#references), …) | triggered / partial | partial | medium–high when deep |
 | nsys / `torch.profiler` | manual / short windows | yes (single job) | **our A10G:** nsys ~56%, profiler CUDA ~36% / full ~143% |
-| **ARGUS** | **yes** | **yes (via compressed stats)** | paper **< 2%**; our semantics probe **~1.6%** |
+| **ARGUS** | **yes** | **yes (via compressed stats)** | paper **< 2%**; our semantics **~1.6%**, naive CUPTI Activity **~11%** |
 
 For a single-machine workflow, stay with the [end-to-end profiling post](/posts/profiling-pytorch-training-end-to-end/). ARGUS is the answer when **every minute of a month-long 10k-GPU run** needs a watchdog that can still name the kernel.
 
