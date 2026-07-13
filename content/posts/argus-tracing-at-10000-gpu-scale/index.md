@@ -20,8 +20,10 @@ What Tencent built to catch fail-slow training jobs on 10k+ GPU clusters with un
 
 Large LLM training jobs are synchronous: one slow rank, link, or host-side stall can waste thousands of GPU-hours without triggering a hard failure. Existing tools split into two camps:
 
-- **Always-on monitors** (Greyhound, Holmes, C4, Minder) — cheap, but stop at machine/link/operator level.
-- **Fine-grained profilers** (MegaScale, EROICA, nsys, `torch.profiler`) — useful for root cause, but 5–30%+ overhead and trace volumes that do not scale to 10k GPUs always-on.
+- **Always-on, coarse monitors** — cheap continuous checks on iteration time, heartbeats, or link/machine health. Good at “something is wrong on node X,” weak at “which kernel and why.”
+- **Fine-grained profilers** — `torch.profiler`, Nsight Systems, and research tracers that can name kernels, but typically cost **5–30%+** overhead and emit trace volumes that cannot stay always-on at 10k GPUs.
+
+(The ARGUS paper’s Table 1 puts recent cluster systems into these two buckets: Greyhound / Holmes / C4 / Minder on the coarse always-on side; MegaScale / EROICA / FLARE on the finer but harder-to-keep-on side. See [References](#references).)
 
 **ARGUS** tries to occupy the missing middle: **fine-grained, always-on, real-time** diagnosis at production scale. The recipe:
 
@@ -357,10 +359,10 @@ uv run python playground/argus_demo_figures.py \
 
 | Tool / system | Always-on? | Kernel-level cross-rank? | Typical overhead |
 |---|---|---|---|
-| Grafana / DCGM metrics | yes | no | very low |
-| Greyhound / Holmes / C4 | yes | no | low |
-| MegaScale / EROICA | triggered / partial | partial | medium–high when deep |
-| nsys / torch.profiler | manual / short windows | yes (single job) | **our A10G:** nsys ~56%, profiler CUDA ~36% / full ~143% |
+| Grafana / DCGM-style metrics | yes | no | very low |
+| Cluster fail-slow monitors ([Greyhound](#references), [Holmes](#references), [C4](#references), …) | yes | no (machine / link / phase) | low |
+| Training-job tracers ([MegaScale](#references), [EROICA](#references), …) | triggered / partial | partial | medium–high when deep |
+| nsys / `torch.profiler` | manual / short windows | yes (single job) | **our A10G:** nsys ~56%, profiler CUDA ~36% / full ~143% |
 | **ARGUS** | **yes** | **yes (via compressed stats)** | paper **< 2%**; our semantics probe **~1.6%** |
 
 For a single-machine workflow, stay with the [end-to-end profiling post](/posts/profiling-pytorch-training-end-to-end/). ARGUS is the answer when **every minute of a month-long 10k-GPU run** needs a watchdog that can still name the kernel.
@@ -385,8 +387,11 @@ What the paper does **not** fully open-source (as of this writing) is the inject
 ## References
 
 - Zhou et al., [ARGUS (arXiv:2606.20374)](https://arxiv.org/abs/2606.20374)
-- Wu et al., Greyhound — fail-slow hunting in hybrid-parallel training (USENIX ATC 2025)
-- Jiang et al., MegaScale — LLM training at 10k+ GPUs (NSDI 2024)
-- Guan et al., EROICA — online performance troubleshooting (NSDI 2026)
-- Cui et al., FLARE — anomaly diagnostics at thousand-GPU scale (NSDI 2026)
+- Wu et al., **Greyhound** — fail-slow hunting via iteration-time / hybrid-parallel signals (USENIX ATC 2025)
+- Yao et al., **Holmes** — localizing training irregularities on mega-scale GPU clusters (NSDI 2025)
+- Dong et al., **C4** — real-time anomaly detection and communication optimization for large-scale training (HPCA 2025)
+- Deng et al., **Minder** — faulty-machine detection for distributed training (NSDI 2025)
+- Jiang et al., **MegaScale** — LLM training production stack at 10k+ GPUs, with phase-level tracing (NSDI 2024)
+- Guan et al., **EROICA** — online performance troubleshooting; deep kernel profiling on trigger (NSDI 2026)
+- Cui et al., **FLARE** — anomaly diagnostics for divergent LLM training at thousand-GPU scale (NSDI 2026)
 - Related local writeup: [Profiling a PyTorch Training Job End to End](/posts/profiling-pytorch-training-end-to-end/)
