@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="746.64pt" height="365.04pt" viewBox="0 0 746.64 365.04" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-07-13T05:17:24.967243</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 365.04 
+L 746.64 365.04 
+L 746.64 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 29.1672 273.102 
+L 241.5168 273.102 
+L 241.5168 83.172 
+L 29.1672 83.172 
+z
+" clip-path="url(#pfc699eff68)" style="fill: #dbeafe; stroke: #2563eb; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 263.484 223.428 
+L 475.8336 223.428 
+L 475.8336 83.172 
+L 263.484 83.172 
+z
+" clip-path="url(#pfc699eff68)" style="fill: #ffedd5; stroke: #d97706; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 497.8008 273.102 
+L 710.1504 273.102 
+L 710.1504 83.172 
+L 497.8008 83.172 
+z
+" clip-path="url(#pfc699eff68)" style="fill: #fee2e2; stroke: #dc2626; stroke-width: 1.5; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_1">
+    <text style="font-size: 14px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f172a" x="373.32" y="30.576" transform="rotate(-0 373.32 30.576)">Distributed training failure taxonomy</text>
+   </g>
+   <g id="text_2">
+    <text style="font-weight: 700; font-size: 12px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2563eb" x="135.342" y="101.130375" transform="rotate(-0 135.342 101.130375)">Numerics</text>
+   </g>
+   <g id="text_3">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="40.1508" y="144.534" transform="rotate(-0 40.1508 144.534)">NaN / Inf</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="40.1508" y="163.2348" transform="rotate(-0 40.1508 163.2348)">overflow, bad LR, no scaler</text>
+   </g>
+   <g id="text_5">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="40.1508" y="194.208" transform="rotate(-0 40.1508 194.208)">Loss spikes</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="40.1508" y="212.9088" transform="rotate(-0 40.1508 212.9088)">corrupt batch / outlier</text>
+   </g>
+   <g id="text_7">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="40.1508" y="243.882" transform="rotate(-0 40.1508 243.882)">Silent drift</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="40.1508" y="262.5828" transform="rotate(-0 40.1508 262.5828)">rank-local weight writes</text>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 12px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #d97706" x="369.6588" y="101.130375" transform="rotate(-0 369.6588 101.130375)">Resources</text>
+   </g>
+   <g id="text_10">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="274.4676" y="144.534" transform="rotate(-0 274.4676 144.534)">Memory leak</text>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="274.4676" y="163.2348" transform="rotate(-0 274.4676 163.2348)">retained tensors / graphs</text>
+   </g>
+   <g id="text_12">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="274.4676" y="194.208" transform="rotate(-0 274.4676 194.208)">Throughput cliff</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="274.4676" y="212.9088" transform="rotate(-0 274.4676 212.9088)">comm ≫ local compute</text>
+   </g>
+   <g id="text_14">
+    <text style="font-weight: 700; font-size: 12px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #dc2626" x="603.9756" y="101.036625" transform="rotate(-0 603.9756 101.036625)">Distributed systems</text>
+   </g>
+   <g id="text_15">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="508.7844" y="144.534" transform="rotate(-0 508.7844 144.534)">Straggler</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="508.7844" y="163.2348" transform="rotate(-0 508.7844 163.2348)">one slow rank paces all</text>
+   </g>
+   <g id="text_17">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="508.7844" y="194.208" transform="rotate(-0 508.7844 194.208)">Bad node</text>
+   </g>
+   <g id="text_18">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="508.7844" y="212.9088" transform="rotate(-0 508.7844 212.9088)">persistent local slowdown</text>
+   </g>
+   <g id="text_19">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f172a" x="508.7844" y="243.882" transform="rotate(-0 508.7844 243.882)">NCCL hang</text>
+   </g>
+   <g id="text_20">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #64748b" x="508.7844" y="262.5828" transform="rotate(-0 508.7844 262.5828)">missing collective peer</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pfc699eff68">
+   <rect x="7.2" y="7.2" width="732.24" height="350.64"/>
+  </clipPath>
+ </defs>
+</svg>

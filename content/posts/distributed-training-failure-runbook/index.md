@@ -1,0 +1,335 @@
+---
+title: "Distributed Training Failure Runbook: Reproducing the Failures That Actually Bite"
+date: 2026-07-13
+tags: ["PyTorch", "DDP", "Distributed Training", "NCCL", "Debugging", "Modal", "Runbook"]
+categories: ["Engineering", "Performance"]
+draft: false
+cover:
+  image: failure_taxonomy.svg
+  alt: "Taxonomy of distributed training failures: numerics, resources, and systems"
+  relative: true
+---
+
+# Distributed Training Failure Runbook: Reproducing the Failures That Actually Bite
+
+Eight reproducible failure modes — NaNs, loss spikes, silent drift, memory leaks, stragglers, bad nodes, collective hangs, and throughput cliffs — plus a triage runbook you can actually run.
+
+## TL;DR
+
+Distributed training rarely dies with a clean stack trace. More often it **looks almost fine** while wasting GPU-hours: loss spikes that recover, ranks that quietly desync, one slow node that paces everyone, or a collective that never returns.
+
+I built a small lab that injects each failure on purpose and measures the debug signal you should look for:
+
+| Failure | Injected bug | What we measured |
+|---|---|---|
+| NaN | FP16 weights + LR=`50`, no scaler | first non-finite loss at **step 2** |
+| Loss spike | corrupt batch ×`1e3` at steps 12, 27 | spike **52–68×** median |
+| Silent drift | rank-0-only param write after step 10 | max \|Δparam\| → **0.20** while loss stays finite |
+| Memory leak | retain activations every step | +**5.1 MB** retained (monotonic) |
+| Straggler | rank 1 delays 120 ms before allreduce | collective wait **0.3 → 121 ms** (~**382×**) |
+| Bad node | rank 0 extra local matmuls | local timer **~15,900×** vs fastest peer |
+| Collective hang | rank 1 exits mid-job | peer error: **Connection closed by peer** |
+| Throughput cliff | fixed 8 MB collective + tiny microbatch | bs=`1` delivers **~1%** of peak samples/s |
+
+Code: [`playground/dist_failure_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/dist_failure_modal.py)
+
+```bash
+# Local CPU/gloo lab (no GPU required):
+uv run python playground/dist_failure_modal.py
+uv run python playground/dist_failure_modal.py --case nan
+
+# Modal GPU path (NCCL when ≥2 GPUs):
+uv run modal run playground/dist_failure_modal.py
+
+# Figures:
+uv run python playground/dist_failure_figures.py \
+  --results playground/dist_failure_results.json \
+  --out content/posts/distributed-training-failure-runbook
+```
+
+![Failure taxonomy](./failure_taxonomy.svg)
+
+## Why a Runbook Beats Folklore
+
+Most distributed debugging advice is a pile of flags: `NCCL_DEBUG=INFO`, `CUDA_LAUNCH_BLOCKING=1`, “try lowering LR”. Those help *after* you know which class of failure you are in.
+
+The missing piece is a **symptom → hypothesis → probe → fix** loop. This post is that loop, backed by minimal repros. Related earlier posts cover adjacent ground ([DDP performance on one GPU](/posts/learning-ddp-performance-tuning-on-one-gpu/), [variable-length throughput](/posts/why-variable-sequence-length-breaks-ddp-throughput/), [ARGUS-style fail-slow detection](/posts/argus-tracing-at-10000-gpu-scale/)); here the focus is **failure injection + triage**.
+
+### Lab assumptions
+
+- **2 ranks**, PyTorch `2.12`, backend **`gloo` on CPU** for the committed numbers (same scripts prefer **NCCL** on Modal when ≥2 GPUs).
+- Tiny MLP + synthetic data. The bugs are real; the model is not.
+- Results: [dist_failure_results.json](./dist_failure_results.json)
+
+That is enough to practice the debug moves before you spend a 512-GPU night on folklore.
+
+## Triage First
+
+![Triage flowchart](./runbook_flowchart.svg)
+
+Before opening `nsys`, answer two questions:
+
+1. **Hard fail or soft degrade?**  
+   Hard: NaN/Inf, NCCL timeout, OOM, process death. Soft: spikes, drift, slow steps, low MFU.
+2. **Per-rank or global?**  
+   If only some ranks look sick, collect **rank-local** timers / losses / mem before you blame the network.
+
+Always log a skinny heartbeat on every rank:
+
+```python
+print(
+    f"rank={rank} step={step} loss={loss.item():.4g} "
+    f"finite={torch.isfinite(loss).item()} "
+    f"step_ms={step_ms:.1f} alloc_mb={alloc_mb:.1f}",
+    flush=True,
+)
+```
+
+If you cannot answer “which rank, which step, which signal”, you are not debugging yet — you are refreshing Grafana.
+
+---
+
+## 1. NaNs
+
+**Symptom:** loss becomes `nan`/`inf`; sometimes only after many steps; sometimes only on some ranks (then DDP spreads it).
+
+**Inject:** FP16 parameters + absurd LR, no GradScaler.
+
+**Healthy control:** FP32 master weights + grad clip (or AMP + GradScaler on CUDA).
+
+![NaN and loss spike](./nan_and_loss_spike.svg)
+
+**Lab result:** broken run hits non-finite loss at **step 2**; healthy control stays finite for 40 steps.
+
+### Debug checklist
+
+1. Assert `torch.isfinite(loss)` and `isfinite` on grads **before** `optimizer.step()`.
+2. Check first occurrence rank (`all_reduce` of a “has_nan” flag).
+3. Bisect: disable AMP → lower LR → add grad clip → enable GradScaler.
+4. Inspect input norms / label ids (garbage in → Inf logits).
+
+### Fix patterns
+
+- Keep **FP32 master weights**; use autocast for compute.
+- `GradScaler` on CUDA AMP; skip non-finite scaler updates.
+- Grad clip (`clip_grad_norm_`) as a seatbelt, not a root-cause fix.
+
+---
+
+## 2. Loss Spikes
+
+**Symptom:** training mostly healthy, but rare steps explode then may recover. Easy to dismiss as “noise”.
+
+**Inject:** multiply features by `1e3` on steps `{12, 27}` (stand-in for bad tokenization, unnormalized images, corrupted shards).
+
+**Lab result:** median loss ≈ `2.31`; spikes **68×** and **52×**.
+
+### Debug checklist
+
+1. Log **per-step** loss on all ranks (not just rank 0 smoothed EMA).
+2. On spike steps, dump batch stats: input L2, max abs, label histogram, sequence length.
+3. Correlate with data source (shard id, worker id, augmentation branch).
+4. Confirm grads were clipped — spikes with clipped grads still poison Adam moments.
+
+### Fix patterns
+
+- Quarantine / skip outlier batches above a norm threshold.
+- Sanitize data pipeline (clip audio/image ranges, validate token ids).
+- Spike-aware logging: keep a ring buffer of last N batch ids.
+
+---
+
+## 3. Silent Numerical Drift
+
+**Symptom:** loss still decreases, checkpoints “train”, but ranks disagree on weights. Eval disagrees with train. Restarting from a checkpoint on different world size changes results.
+
+**Inject:** after step 10, **rank 0 only** does `p.add_(0.01)` on every parameter (stand-in for rank-local EMA, logging side-effect, or “debug edit”).
+
+![Drift and memory leak](./drift_and_memory_leak.svg)
+
+**Lab result:** max abs param diff across ranks grows to **0.20**; **all losses remain finite**. This is the scary one — dashboards stay green.
+
+### Debug checklist
+
+1. Periodically `all_gather` a weight checksum / max abs diff (cheap: one float per param or a hash of flattened buckets).
+2. Diff rank-0 vs rank-k after N steps; anything ≫ `1e-5` in FP32 DDP is a bug.
+3. Search for rank-branched code that writes parameters, buffers, or RNG state.
+4. Watch BatchNorm: prefer SyncBN / freeze BN when stats diverge across shards.
+
+### Fix patterns
+
+- **No rank-local parameter writes.** EMA/buffers must be broadcast or computed identically.
+- Broadcast buffers from rank 0 when intentionally asymmetric.
+- Deterministic smoke test: identical synthetic batch on all ranks → diff must stay ~0.
+
+---
+
+## 4. Memory Leaks
+
+**Symptom:** step time creeps up; CUDA alloc / RSS climbs; eventually OOM after hours.
+
+**Inject:** append detached activations (+ inputs) to a list “for later visualization”.
+
+**Lab result:** retained memory grows **+5.1 MB** over 40 steps (monotonic). Fixed path clears the debug buffer each step and stays flat.
+
+### Debug checklist
+
+1. Plot `torch.cuda.memory_allocated` / `max_memory_allocated` every N steps.
+2. Host RSS (`psutil`) for CPU-side leaks (dataloader, logging, metrics).
+3. `torch.cuda.memory._dump_snapshot()` around suspect regions.
+4. Search for lists/dicts that capture tensors or `loss` histories with graphs attached.
+
+### Fix patterns
+
+- `.detach()` **and** bound retention (ring buffer / never grow unbounded).
+- Do not store `loss` for logging without `.item()` / `.detach()`.
+- Explicit `del` + `empty_cache` only after fixing the root retain; cache clearing is not a fix.
+
+---
+
+## 5. Stragglers
+
+**Symptom:** iteration time jumps; MFU drops; NCCL looks “slow” even though links are fine — everyone is waiting on one late peer.
+
+**Inject:** rank 1 sleeps **120 ms** before an explicit `all_reduce` probe (onset step 8).
+
+![Straggler and bad node](./straggler_and_bad_node.svg)
+
+**Lab result:** collective wait median **0.32 ms → 121 ms** (~**382×**) on **both** ranks. The healthy rank is just as slow on the wall clock — that is the point.
+
+### Debug checklist
+
+1. Time **pre-collective local work** vs **collective wait** per rank.
+2. If collective wait is huge but local compute is fine → straggler or sync bug.
+3. If one rank’s local compute is huge → bad node / data skew / host stall ([ARGUS L1/L2](/posts/argus-tracing-at-10000-gpu-scale/)).
+4. Check dataloader workers, GC, JIT compiles, rank-0 logging flushed under a barrier.
+
+### Fix patterns
+
+- Remove rank-asymmetric host work before collectives.
+- Balance tokens/samples ([length bucketing](/posts/why-variable-sequence-length-breaks-ddp-throughput/)).
+- Isolate and drain the slow rank; do not “tune NCCL” first.
+
+---
+
+## 6. Bad Nodes
+
+**Symptom:** like a permanent straggler. Same GPU id keeps showing up across jobs. Thermal throttle, degraded HBM, PCIe link width drop, CPU interference.
+
+**Inject:** rank 0 runs extra local matmul loops before the step; detect via all-gathered local timer ratios.
+
+**Lab result:** flagged rank `[0]` at **~15,900×** vs the fastest peer’s local timer.
+
+### Debug checklist
+
+1. Maintain a **per-rank local compute** metric that excludes collective wait.
+2. Flag ranks ≥3–5× the fastest peer (or robust z-score over a longer window).
+3. Cross-check with nvidia-smi / DCGM: clocks, Xid errors, ECC, link speed.
+4. Reschedule the same rank onto another machine — if the problem moves with the job placement, it is the node.
+
+### Fix patterns
+
+- Quarantine the node; cordon in the scheduler.
+- Do not keep retrying the same physical GPU and calling it “NCCL flakiness”.
+
+---
+
+## 7. NCCL / Collective Hangs
+
+**Symptom:** ranks stuck in `ncclAllReduce` / `AllGather`; timeout after minutes; or immediate `Connection closed by peer` when a process dies.
+
+**Inject:** healthy allreduce once, then rank 1 exits before the next collective. Rank 0 surfaces a peer-closed error (gloo) — the NCCL analogue is timeout / bus error / async exception.
+
+![Hang timeline and throughput cliff](./hang_and_throughput_cliff.svg)
+
+**Lab result:** hang confirmed; peer error `Connection closed by peer`.
+
+### Debug checklist
+
+1. Enable async error handling: `TORCH_NCCL_ASYNC_ERROR_HANDLING=1` (or PyTorch NCCL watchdog settings for your version).
+2. `NCCL_DEBUG=INFO` / `TRACE` on a **single** failing job reproduction — not always-on in prod.
+3. Heartbeat logs: last completed step per rank. The rank that stops advancing first is the lead.
+4. Confirm every rank takes the **same control-flow path** into every collective (no rank-branched `return` before `all_reduce`).
+5. Check for desynced `barrier` / mismatched collective counts (classic PP + DP bug).
+
+### Fix patterns
+
+- Fail fast with watchdog timeouts; restart from last good checkpoint.
+- Fix control-flow divergence; never “sometimes” skip a collective.
+- On true fabric faults, drain the leaf switch / NIC — but prove it with collective counters, not vibes.
+
+---
+
+## 8. Throughput Cliffs
+
+**Symptom:** scaling out or shrinking microbatch **collapses** samples/s. Looks like “DDP doesn’t scale” when the job is just **communication-bound**.
+
+**Inject:** fixed **8 MB** extra allreduce each step; sweep per-rank batch size `1…128`.
+
+**Lab result:** peak at bs=`128` (~**2372** samples/s); bs=`1` is ~**1.2%** of peak — a cliff, not a gentle slope.
+
+### Debug checklist
+
+1. Plot samples/s (or tokens/s) vs local batch / vs world size.
+2. Break step time into compute vs collective (even crude CUDA events help).
+3. Watch for related cliffs: activation checkpointing tipping memory into rematerialization storms; too-small buckets; sequence-length skew.
+
+### Fix patterns
+
+- Increase local work (microbatch, grad accum carefully).
+- Overlap comm/compute; tune DDP bucket sizes.
+- Avoid “world_size cosplay” with tiny per-rank batches.
+
+---
+
+## The Runbook (Cheat Sheet)
+
+| If you see… | First probe | Likely class | First fix to try |
+|---|---|---|---|
+| `nan`/`inf` loss | which step/rank + input norms | Numerics | scaler / LR / clip / data sanitize |
+| rare loss explosions | batch stats on spike steps | Data | quarantine outliers |
+| fine loss, bad eval / restart drift | weight checksum across ranks | Silent drift | ban rank-local param writes |
+| climbing RSS / CUDA alloc | memory curve per N steps | Leak | stop retaining tensors |
+| all ranks slow after a collective | local vs wait timers | Straggler | remove asymmetric host work |
+| same rank always slow | local timer vs peers + DCGM | Bad node | cordon node |
+| stuck in NCCL | heartbeat + `NCCL_DEBUG` | Hang | fix collective control flow / watchdog |
+| tiny batch, terrible scaling | samples/s vs bs curve | Cliff | enlarge local work / overlap |
+
+### Minimal instrumentation you should keep always-on
+
+Cheap enough for production; rich enough to triage:
+
+1. **Loss + isfinite** per rank (or sampled ranks at large scale).
+2. **Step time** + split: data wait / compute / collective.
+3. **Memory:** allocated + RSS every N steps.
+4. **Weight checksum** every K steps (or after checkpoint).
+5. **Heartbeat** to a central log with rank id.
+
+Heavier tools (`torch.profiler`, nsys, ARGUS-style CUPTI) come **after** classification — see [profiling end to end](/posts/profiling-pytorch-training-end-to-end/) and [ARGUS](/posts/argus-tracing-at-10000-gpu-scale/).
+
+## Reproduce / Extend
+
+```bash
+# all eight cases → playground/dist_failure_results.json
+uv run python playground/dist_failure_modal.py
+
+# single case
+uv run python playground/dist_failure_modal.py --case numerical_drift
+
+# Modal
+uv run modal run playground/dist_failure_modal.py --case straggler
+```
+
+Each case returns structured JSON (`primary` = rank-0 summary, `ranks` = per-rank detail). The figure script copies results into this page bundle.
+
+Want a ninth case? The same harness is the right place: inject one bug, assert one detector, keep the model tiny.
+
+## Takeaways
+
+1. **Separate hard fails from soft degrades** before you touch NCCL flags.
+2. **Loss alone lies** — silent drift and stragglers keep loss finite.
+3. **Time local work and collectives separately** or you will mis-blame the network.
+4. **Unbounded tensor retention** is still the most common slow OOM.
+5. **Repro beats folklore** — if you cannot inject it in 100 lines, you do not understand it yet.
+
+The committed numbers here are from the CPU/`gloo` path so anyone can re-run without a cluster. The Modal entrypoint is the same code with NCCL when multiple GPUs show up — use it when you need GPU-realistic AMP/NCCL timing, not when you only need the failure shape.

@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="746.64pt" height="437.04pt" viewBox="0 0 746.64 437.04" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-07-13T05:17:25.786425</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 437.04 
+L 746.64 437.04 
+L 746.64 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 251.28 83.2752 
+L 495.36 83.2752 
+L 495.36 45.2376 
+L 251.28 45.2376 
+z
+" clip-path="url(#p356ee11966)" style="fill: #f1f5f9; stroke: #64748b; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 220.77 146.6712 
+L 525.87 146.6712 
+L 525.87 108.6336 
+L 220.77 108.6336 
+z
+" clip-path="url(#p356ee11966)" style="fill: #e2e8f0; stroke: #64748b; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 25.506 222.7464 
+L 232.974 222.7464 
+L 232.974 176.256 
+L 25.506 176.256 
+z
+" clip-path="url(#p356ee11966)" style="fill: #fee2e2; stroke: #dc2626; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 25.506 298.8216 
+L 232.974 298.8216 
+L 232.974 252.3312 
+L 25.506 252.3312 
+z
+" clip-path="url(#p356ee11966)" style="fill: #fff1f2; stroke: #dc2626; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 25.506 374.8968 
+L 232.974 374.8968 
+L 232.974 328.4064 
+L 25.506 328.4064 
+z
+" clip-path="url(#p356ee11966)" style="fill: #fecaca; stroke: #dc2626; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 513.666 222.7464 
+L 721.134 222.7464 
+L 721.134 176.256 
+L 513.666 176.256 
+z
+" clip-path="url(#p356ee11966)" style="fill: #dbeafe; stroke: #2563eb; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 513.666 298.8216 
+L 721.134 298.8216 
+L 721.134 252.3312 
+L 513.666 252.3312 
+z
+" clip-path="url(#p356ee11966)" style="fill: #eff6ff; stroke: #2563eb; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 513.666 374.8968 
+L 721.134 374.8968 
+L 721.134 328.4064 
+L 513.666 328.4064 
+z
+" clip-path="url(#p356ee11966)" style="fill: #bfdbfe; stroke: #2563eb; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 251.28 277.6896 
+L 495.36 277.6896 
+L 495.36 226.9728 
+L 251.28 226.9728 
+z
+" clip-path="url(#p356ee11966)" style="fill: #f8fafc; stroke: #7c3aed; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_1">
+    <text style="font-size: 14px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f172a" x="373.32" y="28.332" transform="rotate(-0 373.32 28.332)">Distributed failure triage</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(339.951797 61.700822)">Job unhealthy?</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(319.715156 71.778853)">(loss / step time / hang)</text>
+   </g>
+   <g id="patch_11">
+    <path d="M 373.32 85.274382 
+Q 373.32 93.838841 373.32 100.838051 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 375.52 96.438051 
+L 373.32 100.838051 
+L 371.12 96.438051 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f172a" x="373.32" y="130.135837" transform="rotate(-0 373.32 130.135837)">Hard fail or soft degrade?</text>
+   </g>
+   <g id="patch_12">
+    <path d="M 261.529826 147.101863 
+Q 196.359888 161.464065 132.718519 175.489401 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 137.488887 176.690895 
+L 132.718519 175.489401 
+L 136.541935 172.394003 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(116.185781 196.945622)">HARD</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(75.122578 207.023653)">NaN / NCCL hang / OOM</text>
+   </g>
+   <g id="patch_13">
+    <path d="M 129.24 224.749194 
+Q 129.24 235.427712 129.24 244.540983 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 131.44 240.140983 
+L 129.24 244.540983 
+L 127.04 240.140983 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(97.226719 267.85665)">isfinite checks</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(67.540078 277.934681)">NCCL_DEBUG + heartbeats</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(86.139141 288.263025)">memory snapshots</text>
+   </g>
+   <g id="patch_14">
+    <path d="M 129.24 300.824394 
+Q 129.24 311.502912 129.24 320.616183 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 131.44 316.216183 
+L 129.24 320.616183 
+L 127.04 316.216183 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(67.196953 349.096022)">Fix numerics / replace node</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(55.464609 359.174053)">restart with async error handling</text>
+   </g>
+   <g id="patch_15">
+    <path d="M 485.110174 147.101863 
+Q 550.280112 161.464065 613.921481 175.489401 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 610.098065 172.394003 
+L 613.921481 175.489401 
+L 609.151113 176.690895 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(605.742891 196.945622)">SOFT</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(575.386172 207.023653)">spikes / drift / slow</text>
+   </g>
+   <g id="patch_16">
+    <path d="M 617.4 224.749194 
+Q 617.4 235.427712 617.4 244.540983 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 619.6 240.140983 
+L 617.4 244.540983 
+L 615.2 240.140983 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(567.408516 267.981806)">per-rank loss + timers</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(575.699062 278.059837)">weight checksums</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(569.511562 288.137869)">RSS / allocated curve</text>
+   </g>
+   <g id="patch_17">
+    <path d="M 617.4 300.824394 
+Q 617.4 311.502912 617.4 320.616183 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 619.6 316.216183 
+L 617.4 320.616183 
+L 615.2 316.216183 
+" style="fill: none; stroke: #64748b; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(564.262734 349.096022)">quarantine batch / rank</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(558.407812 359.174053)">raise microbatch / overlap</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(347.739609 244.486294)">Always log:</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(316.106016 254.564325)">rank, step, loss, step_ms,</text>
+    <text style="font-size: 9px; font-family: 'Arial', 'Helvetica', 'DejaVu Sans', sans-serif; fill: #0f172a" transform="translate(328.528828 264.892669)">mem, collective_ms</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p356ee11966">
+   <rect x="7.2" y="7.2" width="732.24" height="422.64"/>
+  </clipPath>
+ </defs>
+</svg>
