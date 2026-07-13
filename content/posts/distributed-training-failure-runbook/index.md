@@ -20,16 +20,16 @@ Distributed training rarely dies with a clean stack trace. More often it **looks
 
 I built a small lab that injects each failure on purpose and measures the debug signal you should look for:
 
-| Failure | Injected bug | What we measured |
+| Failure | Injected bug | What we measured (Modal 2×A10G, NCCL) |
 |---|---|---|
 | NaN (11 recipes) | AMP overflow, bad LR, corrupt data, masks, Adam poison, DDP contagion, … | **11/11** triggered |
-| Loss spike | corrupt batch ×`1e3` at steps 12, 27 | spike **52–68×** median |
+| Loss spike | corrupt batch ×`1e3` at steps 12, 27 | spikes **59–106×** median |
 | Silent drift | rank-0-only param write after step 10 | max \|Δparam\| → **0.20** while loss stays finite |
-| Memory leak | retain activations every step | +**5.1 MB** retained (monotonic) |
-| Straggler | rank 1 delays 120 ms before allreduce | collective wait **0.3 → 121 ms** (~**382×**) |
-| Bad node | rank 0 extra local matmuls | local timer **~15,900×** vs fastest peer |
-| Collective hang | rank 1 exits mid-job | peer error: **Connection closed by peer** |
-| Throughput cliff | fixed 8 MB collective + tiny microbatch | bs=`1` delivers **~1%** of peak samples/s |
+| Memory leak | retain activations every step | +**5.1 MB** CUDA alloc (fixed path flat) |
+| Straggler | rank 1 delays 120 ms before allreduce | collective wait **0.1 → 120 ms** (~**1377×**) |
+| Bad node | rank 0 extra local matmuls | local timer **~2400×** vs fastest peer |
+| Collective hang | rank 1 exits mid-job | rank 0 **blocked in NCCL** until watchdog kill |
+| Throughput cliff | fixed 8 MB collective + tiny microbatch | bs=`1` ≈ **0.8%** of peak (~28k samples/s @ bs=128) |
 
 Code: [`playground/dist_failure_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/dist_failure_modal.py)
 
