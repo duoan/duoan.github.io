@@ -183,29 +183,61 @@ Caveat: this is **not** a full ARGUS CUPTI injector + streaming Processor. We on
 
 ## Case Studies — What Actually Breaks at Scale
 
-These five stories are more valuable than the microbenchmarks.
+These five stories are more valuable than the microbenchmarks. We remasured Cases **1–4** at small scale on Modal; Case 5 is noted but skipped (needs multi-dim EP/DP).
 
-### Case 1: Compute straggler (4096 GPU VLM)
+| Paper case | Failure mode | Small-scale? | Our demo |
+|---|---|---|---|
+| 1 Compute straggler | Local GPU compute slow | **Yes** | L1 change-point + L2 CV |
+| 2 Silent link degradation | Comm kernels slow, step time flat | **Yes** (synthetic NCCL timings) | L1 silent, L3 W₁ blocks |
+| 3 PP bubble masking | Slow PP stage aligned by `grad_sync` | **Yes** (4-stage toy PP) | Totals silent, bwd catches |
+| 4 FlashAttention JIT | Intermittent host compile stall | **Yes** (host sleep on A10G) | L1 jitter, GPU flat |
+| 5 Misleading network alert | Compute straggler → late collective | Partial | Skipped; composable from 1+2 |
 
-L1 regression + L2 CV on compute-only phases (`self_attention`, `mlp`) isolated **DP replicas 656–657** with **150×** slower compute kernels. No communication involved → local GPU/hardware issue, not NCCL.
+```bash
+uv run modal run playground/argus_cases_modal.py
+```
 
-### Case 2: Silent link degradation (512 GPU audio)
+### Case 1: Compute Straggler Localization
 
-Iteration time looked **stable**; L1/L2 silent. **L3 W₁** on AllReduce / AllGather / ReduceScatter showed one **EDP group** with orders-of-magnitude larger inter-group distances. L4 Perfetto confirmed slow **intra-group** collectives without wait time → **PCIe fault on two nodes**, not a slow peer. Greyhound-style heartbeat monitors never fire because there is no spike.
+**Paper (4096-GPU VLM):** L1 regression + L2 CV on compute-only phases isolated DP replicas 656–657 with **150×** slower compute kernels.
 
-### Case 3: Pipeline bubble masking (4096 GPU VLM, PP=4)
+**Our remasurement:** 8 ranks, straggler rank 5 from step 15. Job iteration time (max across ranks) jumps ~16×; L1 change-point at t=15; L2 flags only rank 5 on `self_attention` / `mlp`.
 
-Rank 3760’s backward compute ~**1.9×** slower, but **grad_sync** aligns iteration times across PP stages — L1–L3 all quiet. Manual semantics inspection + L4 Perfetto revealed **asymmetric pipeline bubbles**: downstream rank compute-bound, upstream ranks waiting. PP causal structure hides stragglers from iteration-level stats.
+![Case 1 remasurement](./case1_compute_straggler.svg)
 
-### Case 4: FlashAttention JIT spikes (4096 GPU VLM)
+### Case 2: Communication Link Degradation
 
-Short **40×** backward spikes from **CuTe DSL JIT** on uncached shapes. L1 caught jitter; L2/L3 diluted the sparse event. L4 showed sparse kernel launches and host-side blocking. Fix: disk JIT cache + warmup over shape combinations.
+**Paper (512-GPU audio):** iteration time *stable* so L1/L2 silent; L3 W₁ revealed one EDP group with PCIe faults.
 
-### Case 5: Compute straggler masquerading as network (12,960 GPU MoE)
+**Our remasurement:** ranks 4–7 degraded. L1 silent. AllReduce W₁ **inter/intra ≈ 179×**; healthy-mode p50 gating flags `{4,5,6,7}`. When half the ranks are slow, plain IQR-on-mean-W₁ is symmetric and fails — block structure (or healthy-mode reference) is load-bearing.
 
-Out-of-band monitoring reported **“port down”** on an affected node. ARGUS L2 showed degradation only on **pure compute (`mlp`)**, while ReduceScatter on the same EP group looked *faster* because stragglers entered the collective late — a **secondary symptom**. Replacing nodes fixed throughput; network repair would not have.
+![Case 2 remasurement](./case2_link_degradation.svg)
+
+### Case 3: Pipeline Bubble Amplification
+
+**Paper (PP=4):** last stage ~1.9× slower backward-compute, but `finish_grad_sync` aligns totals so L1–L3 stay quiet.
+
+**Our remasurement:** stage 3 at **1.90×** bwd; aligned totals CV = **0** → L1/L2 silent; inspecting backward-compute recovers stage 3. Upstream bubbles larger (idle wait); straggler bubbles tighter (compute-packed).
+
+![Case 3 remasurement](./case3_pp_masking.svg)
+
+### Case 4: FlashAttention JIT Compilation
+
+**Paper:** occasional **40×** backward spikes from CuTe DSL JIT; L1 catches jitter; L2/L3 dilute rare events.
+
+**Our remasurement (A10G):** 80 ms host sleep on steps 12 and 27. Wall spike **~45×**; GPU event time stays ~1.8 ms (host-bound). L1 jitter fires; window-mean L2/L3 would dilute the spikes.
+
+![Case 4 remasurement](./case4_jit_stall.svg)
+
+### Case 5: Compute Straggler with Misleading Out-of-band Metrics
+
+**Paper (12,960-GPU MoE):** out-of-band “port down” looked like network; ARGUS showed pure-compute `mlp` degradation, with *shorter* ReduceScatter from late collective entry.
+
+**Why skipped:** the timing pattern (slow compute → late arrival → short measured collective) is composable from Cases 1+2; a faithful EP=32 schedule on one Modal GPU adds complexity without new detection math.
 
 **Meta-lesson:** no single diagnostic level wins. ARGUS wins by **composition**.
+
+Raw case results: [argus_cases_results.json](./argus_cases_results.json) · code: [`argus_cases_modal.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/argus_cases_modal.py)
 
 ## Mini Experiment: KDE + W₁ on a Simulated Straggler
 

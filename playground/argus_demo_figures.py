@@ -284,6 +284,88 @@ def overhead_figures(overhead: dict, out: Path) -> None:
     plt.close(fig)
 
 
+def case_figures(cases: dict, out: Path) -> None:
+    """Figures for remasured ARGUS cases 1–4."""
+    c1, c2, c3, c4 = cases["case1"], cases["case2"], cases["case3"], cases["case4"]
+
+    # Case 1: iteration time + phase heatmap
+    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.2))
+    ax = axes[0]
+    ax.plot(c1["iter_ms"], color="#1f2933", lw=1.6)
+    ax.axvline(c1["onset_step"], color="#C44E52", ls="--", lw=1.2, label="straggler onset")
+    if c1.get("l1_change_point"):
+        ax.axvline(c1["l1_change_point"]["t"], color="#4C72B0", ls=":", lw=1.4, label="L1 change-point")
+    ax.set_xlabel("step")
+    ax.set_ylabel("iteration time (ms, max across ranks)")
+    ax.set_title("Case 1 · L1 sees regression")
+    ax.legend(frameon=False, fontsize=9)
+
+    ax = axes[1]
+    data = np.vstack([c1["heatmap_attn_ms"], c1["heatmap_mlp_ms"]])
+    im = ax.imshow(data, aspect="auto", cmap="YlOrRd")
+    ax.set_yticks([0, 1])
+    ax.set_yticklabels(["self_attention", "mlp"])
+    ax.set_xticks(range(c1["n_ranks"]))
+    ax.set_xticklabels([f"r{i}" for i in range(c1["n_ranks"])])
+    ax.set_title("Case 1 · L2 phase means (post-onset)")
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="ms")
+    fig.tight_layout()
+    fig.savefig(out / "case1_compute_straggler.svg", bbox_inches="tight")
+    plt.close(fig)
+
+    # Case 2: W1 matrix
+    mat = np.asarray(c2["w1_allreduce_matrix"], dtype=np.float64)
+    fig, ax = plt.subplots(figsize=(5.4, 4.6))
+    im = ax.imshow(mat, cmap="YlOrRd")
+    n = c2["n_ranks"]
+    ax.set_xticks(range(n))
+    ax.set_yticks(range(n))
+    ax.set_xticklabels([f"r{i}" for i in range(n)])
+    ax.set_yticklabels([f"r{i}" for i in range(n)])
+    ax.set_title(
+        f"Case 2 · AllReduce W₁ (inter/intra={c2['w1_inter_intra_ratio']:.0f}×)"
+    )
+    for i in c2["degraded_ranks"]:
+        ax.add_patch(plt.Rectangle((i - 0.5, -0.5), 1, n, fill=False, edgecolor="#1d4ed8", lw=1.5))
+        ax.add_patch(plt.Rectangle((-0.5, i - 0.5), n, 1, fill=False, edgecolor="#1d4ed8", lw=1.5))
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="W₁")
+    fig.tight_layout()
+    fig.savefig(out / "case2_link_degradation.svg", bbox_inches="tight")
+    plt.close(fig)
+
+    # Case 3: bwd vs aligned totals
+    fig, axes = plt.subplots(1, 2, figsize=(10.5, 4.0))
+    stages = [f"PP{i}" for i in range(c3["pp_stages"])]
+    ax = axes[0]
+    ax.bar(stages, c3["backward_compute_means_ms"], color=["#94a3b8"] * 3 + ["#C44E52"])
+    ax.set_ylabel("backward-compute mean (ms)")
+    ax.set_title(f"Case 3 · bwd ratio={c3['backward_ratio_vs_peers']:.2f}×")
+    ax = axes[1]
+    ax.bar(stages, c3["fwd_bwd_total_means_ms"], color="#4C72B0")
+    ax.set_ylabel("fwd–bwd total after grad_sync (ms)")
+    ax.set_title("Case 3 · L1/L2 on totals are silent")
+    fig.tight_layout()
+    fig.savefig(out / "case3_pp_masking.svg", bbox_inches="tight")
+    plt.close(fig)
+
+    # Case 4: wall vs gpu with spikes
+    fig, ax = plt.subplots(figsize=(9.5, 4.0))
+    xs = np.arange(c4["n_steps"])
+    ax.plot(xs, c4["wall_ms"], color="#C44E52", lw=1.6, label="wall step time")
+    ax.plot(xs, c4["gpu_ms"], color="#4C72B0", lw=1.4, label="GPU event time")
+    for s in c4["stall_steps"]:
+        ax.axvline(s, color="#94a3b8", ls="--", lw=1.0)
+    ax.set_xlabel("step")
+    ax.set_ylabel("ms")
+    ax.set_title(
+        f"Case 4 · host/JIT stall ({c4['spike_ratio_vs_normal']:.0f}× wall spike; GPU flat)"
+    )
+    ax.legend(frameon=False, fontsize=9)
+    fig.tight_layout()
+    fig.savefig(out / "case4_jit_stall.svg", bbox_inches="tight")
+    plt.close(fig)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--results", type=Path, default=Path("playground/argus_demo_results.json"))
@@ -292,12 +374,18 @@ def main() -> None:
         type=Path,
         default=Path("playground/argus_overhead_results.json"),
     )
+    parser.add_argument(
+        "--cases",
+        type=Path,
+        default=Path("playground/argus_cases_results.json"),
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
     results = json.loads(args.results.read_text()) if args.results.exists() else None
     overhead = json.loads(args.overhead.read_text()) if args.overhead.exists() else None
+    cases = json.loads(args.cases.read_text()) if args.cases.exists() else None
 
     architecture_figure(args.out)
     progressive_diagnosis_figure(args.out)
@@ -309,6 +397,9 @@ def main() -> None:
 
     if overhead:
         overhead_figures(overhead, args.out)
+
+    if cases:
+        case_figures(cases, args.out)
 
     print(f"Wrote figures to {args.out}")
 
