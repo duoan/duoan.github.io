@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="340" viewBox="0 0 920 340" role="img" aria-labelledby="title desc">
+  <title id="title">FlashAttention generations</title>
+  <desc id="desc">FA1 IO-aware tiling through FA4 Blackwell asymmetric co-design.</desc>
+  <defs>
+    <style>
+      .h { font: 700 18px "IBM Plex Sans", "Segoe UI", sans-serif; fill: #0f172a; }
+      .t { font: 700 14px "IBM Plex Sans", "Segoe UI", sans-serif; fill: #0f172a; }
+      .d { font: 500 12px "IBM Plex Sans", "Segoe UI", sans-serif; fill: #475569; }
+    </style>
+  </defs>
+  <rect width="920" height="340" fill="#f8fafc"/>
+  <text x="36" y="36" class="h">Attention optimization migrated with the hardware bottleneck</text>
+
+  <rect x="36" y="60" width="200" height="240" rx="12" fill="#fff1f2" stroke="#fb7185" stroke-width="2"/>
+  <text x="54" y="95" class="t">FA-1 · IO</text>
+  <text x="54" y="125" class="d">Materialized S×S</text>
+  <text x="54" y="145" class="d">scores dominate HBM</text>
+  <text x="54" y="180" class="d">Tiled Q/K/V +</text>
+  <text x="54" y="200" class="d">online softmax</text>
+  <text x="54" y="235" class="d">Never write the</text>
+  <text x="54" y="255" class="d">full attention matrix</text>
+
+  <rect x="252" y="60" width="200" height="240" rx="12" fill="#eff6ff" stroke="#60a5fa" stroke-width="2"/>
+  <text x="270" y="95" class="t">FA-2 · Partition</text>
+  <text x="270" y="125" class="d">Non-matmul FLOPs,</text>
+  <text x="270" y="145" class="d">parallelism, warps</text>
+  <text x="270" y="180" class="d">Fewer rescales;</text>
+  <text x="270" y="200" class="d">better work split</text>
+  <text x="270" y="235" class="d">A100 utilization</text>
+  <text x="270" y="255" class="d">pushed to 5073%</text>
+
+  <rect x="468" y="60" width="200" height="240" rx="12" fill="#ecfdf5" stroke="#34d399" stroke-width="2"/>
+  <text x="486" y="95" class="t">FA-3 · Hopper</text>
+  <text x="486" y="125" class="d">Async HW underused:</text>
+  <text x="486" y="145" class="d">TMA + WGMMA</text>
+  <text x="486" y="180" class="d">Warp specialization;</text>
+  <text x="486" y="200" class="d">matmul ” softmax</text>
+  <text x="486" y="235" class="d">Pipeline data,</text>
+  <text x="486" y="255" class="d">MMA, and SFU</text>
+
+  <rect x="684" y="60" width="200" height="240" rx="12" fill="#f5f3ff" stroke="#a78bfa" stroke-width="2"/>
+  <text x="702" y="95" class="t">FA-4 · Blackwell</text>
+  <text x="702" y="125" class="d">TC faster than</text>
+  <text x="702" y="145" class="d">SFU / SMEM / TMEM</text>
+  <text x="702" y="180" class="d">Async MMA, 2-CTA,</text>
+  <text x="702" y="200" class="d">software exp path</text>
+  <text x="702" y="235" class="d">Not a port of FA-3 </text>
+  <text x="702" y="255" class="d">rebalance the ratios</text>
+</svg>
