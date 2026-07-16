@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="920" height="420" viewBox="0 0 920 420" role="img" aria-labelledby="title desc">
   <title id="title">Four layers of foundation-model kernel co-design</title>
   <desc id="desc">On-chip dataflow, operator graph, multi-GPU dataflow, and model structure stack from bottom to top.</desc>
@@ -6,30 +7,24 @@
       <stop offset="0%" stop-color="#0f172a"/>
       <stop offset="100%" stop-color="#1e293b"/>
     </linearGradient>
-    <style>
-      .label { font: 700 18px "IBM Plex Sans", "Segoe UI", sans-serif; fill: #0f172a; }
-      .sub { font: 500 13px "IBM Plex Sans", "Segoe UI", sans-serif; fill: #334155; }
-      .title { font: 700 22px "IBM Plex Sans", "Segoe UI", sans-serif; fill: #f8fafc; }
-      .caption { font: 500 13px "IBM Plex Sans", "Segoe UI", sans-serif; fill: #94a3b8; }
-    </style>
   </defs>
   <rect width="920" height="420" fill="url(#bg)"/>
-  <text x="48" y="48" class="title">Four layers of kernel co-design (2026)</text>
-  <text x="48" y="74" class="caption">Fast kernels alone are not enough  move data less, then change the problem</text>
+  <text x="48" y="48" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#f8fafc">Four layers of kernel co-design (2026)</text>
+  <text x="48" y="74" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#94a3b8">Fast kernels alone are not enough -- move data less, then change the problem</text>
 
   <rect x="48" y="110" width="824" height="58" rx="10" fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
-  <text x="68" y="135" class="label">4 · Model structure</text>
-  <text x="68" y="156" class="sub">GQA / MLA · sparse attention · dynamic visual tokens · MoE routing · SSM · diffusion cache / fewer steps</text>
+  <text x="68" y="135" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#0f172a">4. Model structure</text>
+  <text x="68" y="156" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#334155">GQA / MLA, sparse attention, dynamic visual tokens, MoE routing, SSM, diffusion cache / fewer steps</text>
 
   <rect x="48" y="180" width="824" height="58" rx="10" fill="#dbeafe" stroke="#3b82f6" stroke-width="2"/>
-  <text x="68" y="205" class="label">3 · Multi-GPU dataflow</text>
-  <text x="68" y="226" class="sub">Collective decomposition · tile/chunk overlap · topology · expert / token scheduling</text>
+  <text x="68" y="205" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#0f172a">3. Multi-GPU dataflow</text>
+  <text x="68" y="226" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#334155">Collective decomposition, tile/chunk overlap, topology, expert / token scheduling</text>
 
   <rect x="48" y="250" width="824" height="58" rx="10" fill="#dcfce7" stroke="#22c55e" stroke-width="2"/>
-  <text x="68" y="275" class="label">2 · Operator graph</text>
-  <text x="68" y="296" class="sub">Fusion · recompute · layout · paging · persistent scheduling · packing</text>
+  <text x="68" y="275" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#0f172a">2. Operator graph</text>
+  <text x="68" y="296" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#334155">Fusion, recompute, layout, paging, persistent scheduling, packing</text>
 
   <rect x="48" y="320" width="824" height="58" rx="10" fill="#ffe4e6" stroke="#f43f5e" stroke-width="2"/>
-  <text x="68" y="345" class="label">1 · On-chip dataflow</text>
-  <text x="68" y="366" class="sub">Tile · async copy · warp specialization · TMEM / LDS · epilogue fusion</text>
+  <text x="68" y="345" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#0f172a">1. On-chip dataflow</text>
+  <text x="68" y="366" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#334155">Tile, async copy, warp specialization, TMEM / LDS, epilogue fusion</text>
 </svg>

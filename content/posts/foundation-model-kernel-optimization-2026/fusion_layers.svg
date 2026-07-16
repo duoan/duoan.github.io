@@ -1,55 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="920" height="380" viewBox="0 0 920 380" role="img" aria-labelledby="title desc">
   <title id="title">Four levels of fusion</title>
   <desc id="desc">Elementwise fusion, GEMM epilogue fusion, GEMM-to-GEMM fusion, and compute-communication fusion.</desc>
-  <defs>
-    <style>
-      .h { font: 700 20px "IBM Plex Sans", "Segoe UI", sans-serif; fill: #0f172a; }
-      .t { font: 700 15px "IBM Plex Sans", "Segoe UI", sans-serif; fill: #0f172a; }
-      .d { font: 500 12px "IBM Plex Sans", "Segoe UI", sans-serif; fill: #475569; }
-      .bg { fill: #f8fafc; }
-    </style>
-  </defs>
-  <rect width="920" height="380" class="bg"/>
-  <text x="40" y="42" class="h">Fusion is layered  more is not always better</text>
+  <rect width="920" height="380" fill="#f8fafc"/>
+  <text x="40" y="42" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="20" font-weight="700" fill="#0f172a">Fusion is layered -- more is not always better</text>
 
   <rect x="40" y="70" width="200" height="260" rx="12" fill="#fff7ed" stroke="#fb923c" stroke-width="2"/>
-  <text x="58" y="105" class="t">Elementwise</text>
-  <text x="58" y="130" class="d">” elementwise</text>
-  <text x="58" y="165" class="d">Cut launches and</text>
-  <text x="58" y="185" class="d">HBM round-trips</text>
-  <text x="58" y="220" class="d">bias ’ act ’</text>
-  <text x="58" y="240" class="d">dropout ’ residual</text>
-  <text x="58" y="275" class="d">Safe default for</text>
-  <text x="58" y="295" class="d">pointwise chains</text>
+  <text x="58" y="105" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#0f172a">Elementwise</text>
+  <text x="58" y="130" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">&lt;-&gt; elementwise</text>
+  <text x="58" y="165" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">Cut launches and</text>
+  <text x="58" y="185" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">HBM round-trips</text>
+  <text x="58" y="220" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">bias -&gt; act -&gt;</text>
+  <text x="58" y="240" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">dropout -&gt; residual</text>
+  <text x="58" y="275" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">Safe default for</text>
+  <text x="58" y="295" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">pointwise chains</text>
 
   <rect x="260" y="70" width="200" height="260" rx="12" fill="#ecfeff" stroke="#06b6d4" stroke-width="2"/>
-  <text x="278" y="105" class="t">GEMM</text>
-  <text x="278" y="130" class="d">epilogue / prologue</text>
-  <text x="278" y="165" class="d">Do work while the</text>
-  <text x="278" y="185" class="d">accumulator tile is</text>
-  <text x="278" y="205" class="d">still on-chip</text>
-  <text x="278" y="240" class="d">scale / bias / act /</text>
-  <text x="278" y="260" class="d">quant / residual</text>
-  <text x="278" y="295" class="d">Highest ROI fusion</text>
+  <text x="278" y="105" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#0f172a">GEMM</text>
+  <text x="278" y="130" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">epilogue / prologue</text>
+  <text x="278" y="165" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">Do work while the</text>
+  <text x="278" y="185" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">accumulator tile is</text>
+  <text x="278" y="205" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">still on-chip</text>
+  <text x="278" y="240" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">scale / bias / act /</text>
+  <text x="278" y="260" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">quant / residual</text>
+  <text x="278" y="295" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">Highest ROI fusion</text>
 
   <rect x="480" y="70" width="200" height="260" rx="12" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
-  <text x="498" y="105" class="t">GEMM ” GEMM</text>
-  <text x="498" y="130" class="d">/ attention</text>
-  <text x="498" y="165" class="d">Only when inputs,</text>
-  <text x="498" y="185" class="d">layout, or pipeline</text>
-  <text x="498" y="205" class="d">are shared</text>
-  <text x="498" y="240" class="d">Risk: register /</text>
-  <text x="498" y="260" class="d">SMEM pressure,</text>
-  <text x="498" y="280" class="d">occupancy collapse</text>
+  <text x="498" y="105" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#0f172a">GEMM &lt;-&gt; GEMM</text>
+  <text x="498" y="130" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">/ attention</text>
+  <text x="498" y="165" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">Only when inputs,</text>
+  <text x="498" y="185" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">layout, or pipeline</text>
+  <text x="498" y="205" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">are shared</text>
+  <text x="498" y="240" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">Risk: register /</text>
+  <text x="498" y="260" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">SMEM pressure,</text>
+  <text x="498" y="280" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">occupancy collapse</text>
 
   <rect x="700" y="70" width="180" height="260" rx="12" fill="#fef2f2" stroke="#ef4444" stroke-width="2"/>
-  <text x="718" y="105" class="t">Compute ”</text>
-  <text x="718" y="130" class="d">communication</text>
-  <text x="718" y="165" class="d">Tile-complete events</text>
-  <text x="718" y="185" class="d">become network</text>
-  <text x="718" y="205" class="d">transfers</text>
-  <text x="718" y="240" class="d">Not finish the op,</text>
-  <text x="718" y="260" class="d">then collective</text>
-  <text x="718" y="295" class="d">Hardest, highest</text>
-  <text x="718" y="315" class="d">system leverage</text>
+  <text x="718" y="105" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#0f172a">Compute &lt;-&gt;</text>
+  <text x="718" y="130" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">communication</text>
+  <text x="718" y="165" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">Tile-complete events</text>
+  <text x="718" y="185" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">become network</text>
+  <text x="718" y="205" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">transfers</text>
+  <text x="718" y="240" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">Not "finish the op,</text>
+  <text x="718" y="260" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">then collective"</text>
+  <text x="718" y="295" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">Hardest, highest</text>
+  <text x="718" y="315" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#475569">system leverage</text>
 </svg>
