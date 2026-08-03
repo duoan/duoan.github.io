@@ -37,17 +37,17 @@ The series is designed to be read in order, but each post stands alone.
 2. [Data Parallelism: From Parameter Server to Ring All-Reduce](../data-parallelism-ddp-ring-allreduce/)
 3. [ZeRO: Partitioning Optimizer State, Gradients, and Parameters](../zero-redundancy-optimizer/)
 4. [Tensor Parallelism in Megatron-LM: Splitting Layers, Not Stacks](../tensor-parallelism-megatron/)
-5. [Megatron Distributed Initialization](../megatron-distributed-init/) (coming)
-6. [Megatron Model Parallel Internals](../megatron-model-parallel-internals/) (coming)
-7. [Megatron Mixed Precision Training](../megatron-mixed-precision-training/) (coming)
-8. [MoE Expert Parallelism: Principles](../moe-expert-parallelism-principles/) (coming)
-9. [DeepSpeed-Megatron MoE Internals](../moe-deepspeed-megatron-internals/) (coming)
-10. [Sequence Parallelism in Megatron](../sequence-parallelism-megatron-sp/) (coming)
-11. [Sequence Parallelism with Ulysses](../sequence-parallelism-ulysses/) (coming)
-12. [Ring Attention](../ring-attention/) (coming)
-13. [Megatron Context Parallelism](../megatron-context-parallel/) (coming)
-14. [Megatron Tensor-Parallel Communication Overlap](../megatron-tp-comm-overlap/) (coming)
-15. [ZeRO-3 Intra-Layer Partitioning](../zero3-intra-layer-partitioning/) (coming)
+5. [Megatron Internals I: Building the DP / TP / PP Process Groups](../megatron-distributed-init/)
+6. [Megatron Internals II: Column/Row Parallel Linear and Vocab Parallel Embedding](../megatron-model-parallel-internals/)
+7. [Megatron Internals III: Mixed Precision, Loss Scaling, and Grad Clipping](../megatron-mixed-precision-training/)
+8. [MoE Parallelism Principles: GShard, Expert Parallel, and All-to-All](../moe-expert-parallelism-principles/)
+9. [MoE Internals: DeepSpeed-Megatron Expert Parallel Implementation](../moe-deepspeed-megatron-internals/)
+10. [Sequence Parallelism I: Megatron SP](../sequence-parallelism-megatron-sp/)
+11. [Sequence Parallelism II: DeepSpeed Ulysses](../sequence-parallelism-ulysses/)
+12. [Sequence Parallelism III: Ring Attention](../ring-attention/)
+13. [Sequence Parallelism IV: Megatron Context Parallel](../megatron-context-parallel/)
+14. [Hiding Tensor-Parallel Collectives: AG/RS Overlap in Megatron](../megatron-tp-comm-overlap/)
+15. [The ZeRO-3 Diagram Most People Remember Is Wrong](../zero3-intra-layer-partitioning/)
 
 ## How the Pieces Fit
 
@@ -95,6 +95,15 @@ If you are designing a training run, start with the simplest viable plan:
 7. Add MoE/expert parallelism only when the model architecture itself is sparse.
 
 This order is not universal, but it keeps complexity proportional to the constraint you are actually hitting.
+
+## Related Posts Already on This Blog
+
+These earlier notes sit beside the series rather than inside it:
+
+- [From Scaling Laws to Cluster Size](../large-model-capacity-plan/) — tokens → FLOPs → GPU-hours before you pick a parallel recipe
+- [Large MoE Performance: The Three Walls After Sparsity](../large-moe-from-sparsity-to-communication/) — production MegaScale / Megatron-Core MoE co-design
+- [Learning PyTorch DDP Performance Tuning on a One-GPU Machine](../learning-ddp-performance-tuning-on-one-gpu/) — DDP pathologies you can reproduce locally
+- [Why Variable Sequence Length Breaks DDP Throughput](../why-variable-sequence-length-breaks-ddp-throughput/) — token imbalance under data parallel
 
 ## References
 

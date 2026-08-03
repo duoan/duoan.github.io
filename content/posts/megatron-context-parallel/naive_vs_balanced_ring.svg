@@ -6,7 +6,7 @@
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
     <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
-    <dc:date>2026-08-03T00:44:12.351208</dc:date>
+    <dc:date>2026-08-03T00:51:16.412824</dc:date>
     <dc:format>image/svg+xml</dc:format>
     <dc:creator>
      <cc:Agent>
@@ -40,7 +40,7 @@ Q 47.5278 84.540343 47.5278 87.135771
 L 47.5278 111.5328 
 Q 47.5278 114.128229 50.5488 114.128229 
 z
-" clip-path="url(#p0a75f0b85c)" style="fill: #f7e9e8; stroke: #c44e52; stroke-width: 1.4; stroke-linejoin: miter"/>
+" clip-path="url(#p0c3a716f23)" style="fill: #f7e9e8; stroke: #c44e52; stroke-width: 1.4; stroke-linejoin: miter"/>
    </g>
    <g id="patch_3">
     <path d="M 72.3 329.029714 
@@ -48,7 +48,7 @@ L 111.573 329.029714
 L 111.573 287.502857 
 L 72.3 287.502857 
 z
-" clip-path="url(#p0a75f0b85c)" style="fill: #f7e9e8; stroke: #c44e52; stroke-linejoin: miter"/>
+" clip-path="url(#p0c3a716f23)" style="fill: #f7e9e8; stroke: #c44e52; stroke-linejoin: miter"/>
    </g>
    <g id="patch_4">
     <path d="M 132.72 329.029714 
@@ -56,7 +56,7 @@ L 171.993 329.029714
 L 171.993 245.976 
 L 132.72 245.976 
 z
-" clip-path="url(#p0a75f0b85c)" style="fill: #f7e9e8; stroke: #c44e52; stroke-linejoin: miter"/>
+" clip-path="url(#p0c3a716f23)" style="fill: #f7e9e8; stroke: #c44e52; stroke-linejoin: miter"/>
    </g>
    <g id="patch_5">
     <path d="M 193.14 329.029714 
@@ -64,7 +64,7 @@ L 232.413 329.029714
 L 232.413 204.449143 
 L 193.14 204.449143 
 z
-" clip-path="url(#p0a75f0b85c)" style="fill: #f7e9e8; stroke: #c44e52; stroke-linejoin: miter"/>
+" clip-path="url(#p0c3a716f23)" style="fill: #f7e9e8; stroke: #c44e52; stroke-linejoin: miter"/>
    </g>
    <g id="patch_6">
     <path d="M 253.56 329.029714 
@@ -72,7 +72,7 @@ L 292.833 329.029714
 L 292.833 162.922286 
 L 253.56 162.922286 
 z
-" clip-path="url(#p0a75f0b85c)" style="fill: #f7e9e8; stroke: #c44e52; stroke-linejoin: miter"/>
+" clip-path="url(#p0c3a716f23)" style="fill: #f7e9e8; stroke: #c44e52; stroke-linejoin: miter"/>
    </g>
    <g id="patch_7">
     <path d="M 400.9848 114.128229 
@@ -85,7 +85,7 @@ Q 397.9638 84.540343 397.9638 87.135771
 L 397.9638 111.5328 
 Q 397.9638 114.128229 400.9848 114.128229 
 z
-" clip-path="url(#p0a75f0b85c)" style="fill: #e7f1ea; stroke: #55a868; stroke-width: 1.4; stroke-linejoin: miter"/>
+" clip-path="url(#p0c3a716f23)" style="fill: #e7f1ea; stroke: #55a868; stroke-width: 1.4; stroke-linejoin: miter"/>
    </g>
    <g id="patch_8">
     <path d="M 422.736 329.029714 
@@ -93,7 +93,7 @@ L 462.009 329.029714
 L 462.009 204.449143 
 L 422.736 204.449143 
 z
-" clip-path="url(#p0a75f0b85c)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+" clip-path="url(#p0c3a716f23)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
    </g>
    <g id="patch_9">
     <path d="M 483.156 329.029714 
@@ -101,7 +101,7 @@ L 522.429 329.029714
 L 522.429 204.449143 
 L 483.156 204.449143 
 z
-" clip-path="url(#p0a75f0b85c)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+" clip-path="url(#p0c3a716f23)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
    </g>
    <g id="patch_10">
     <path d="M 543.576 329.029714 
@@ -109,7 +109,7 @@ L 582.849 329.029714
 L 582.849 204.449143 
 L 543.576 204.449143 
 z
-" clip-path="url(#p0a75f0b85c)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+" clip-path="url(#p0c3a716f23)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
    </g>
    <g id="patch_11">
     <path d="M 603.996 329.029714 
@@ -117,7 +117,7 @@ L 643.269 329.029714
 L 643.269 204.449143 
 L 603.996 204.449143 
 z
-" clip-path="url(#p0a75f0b85c)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+" clip-path="url(#p0c3a716f23)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
    </g>
    <g id="text_1">
     <text style="font-size: 10px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #1f2933" x="193.14" y="102.093661" transform="rotate(-0 193.14 102.093661)">Naive: rank i owns contiguous chunk i</text>
@@ -173,7 +173,7 @@ z
   </g>
  </g>
  <defs>
-  <clipPath id="p0a75f0b85c">
+  <clipPath id="p0c3a716f23">
    <rect x="11.88" y="27.96" width="725.04" height="363.36"/>
   </clipPath>
  </defs>

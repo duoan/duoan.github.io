@@ -6,7 +6,7 @@
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
     <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
-    <dc:date>2026-08-03T00:47:15.277151</dc:date>
+    <dc:date>2026-08-03T00:51:14.749924</dc:date>
     <dc:format>image/svg+xml</dc:format>
     <dc:creator>
      <cc:Agent>
@@ -35,7 +35,7 @@ L 131.526 190.810435
 L 131.526 137.634783 
 L 67.368 137.634783 
 z
-" clip-path="url(#p15d54c21fd)" style="fill: #e8eef7; stroke: #1f2933; stroke-linejoin: miter"/>
+" clip-path="url(#pcf2ee4273f)" style="fill: #e8eef7; stroke: #1f2933; stroke-linejoin: miter"/>
    </g>
    <g id="patch_3">
     <path d="M 131.526 190.810435 
@@ -43,7 +43,7 @@ L 195.684 190.810435
 L 195.684 137.634783 
 L 131.526 137.634783 
 z
-" clip-path="url(#p15d54c21fd)" style="fill: #e7f1ea; stroke: #1f2933; stroke-linejoin: miter"/>
+" clip-path="url(#pcf2ee4273f)" style="fill: #e7f1ea; stroke: #1f2933; stroke-linejoin: miter"/>
    </g>
    <g id="patch_4">
     <path d="M 195.684 190.810435 
@@ -51,7 +51,7 @@ L 324 190.810435
 L 324 137.634783 
 L 195.684 137.634783 
 z
-" clip-path="url(#p15d54c21fd)" style="fill: #efecf5; stroke: #1f2933; stroke-linejoin: miter"/>
+" clip-path="url(#pcf2ee4273f)" style="fill: #efecf5; stroke: #1f2933; stroke-linejoin: miter"/>
    </g>
    <g id="patch_5">
     <path d="M 324 190.810435 
@@ -59,7 +59,7 @@ L 452.316 190.810435
 L 452.316 137.634783 
 L 324 137.634783 
 z
-" clip-path="url(#p15d54c21fd)" style="fill: #faefe6; stroke: #1f2933; stroke-linejoin: miter"/>
+" clip-path="url(#pcf2ee4273f)" style="fill: #faefe6; stroke: #1f2933; stroke-linejoin: miter"/>
    </g>
    <g id="patch_6">
     <path d="M 452.316 190.810435 
@@ -67,7 +67,7 @@ L 580.632 190.810435
 L 580.632 137.634783 
 L 452.316 137.634783 
 z
-" clip-path="url(#p15d54c21fd)" style="fill: #faefe6; stroke: #1f2933; stroke-linejoin: miter"/>
+" clip-path="url(#pcf2ee4273f)" style="fill: #faefe6; stroke: #1f2933; stroke-linejoin: miter"/>
    </g>
    <g id="text_1">
     <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="99.447" y="166.430109" transform="rotate(-0 99.447 166.430109)">2B</text>
@@ -108,7 +108,7 @@ z
   </g>
  </g>
  <defs>
-  <clipPath id="p15d54c21fd">
+  <clipPath id="pcf2ee4273f">
    <rect x="11.88" y="27.96" width="624.24" height="305.76"/>
   </clipPath>
  </defs>

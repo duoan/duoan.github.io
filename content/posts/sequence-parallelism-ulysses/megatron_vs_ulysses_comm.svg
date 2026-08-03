@@ -6,7 +6,7 @@
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
     <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
-    <dc:date>2026-08-03T00:44:12.124126</dc:date>
+    <dc:date>2026-08-03T00:51:16.189753</dc:date>
     <dc:format>image/svg+xml</dc:format>
     <dc:creator>
      <cc:Agent>
@@ -35,7 +35,7 @@ L 559.8792 145.056
 L 559.8792 114.388 
 L 216.5544 114.388 
 z
-" clip-path="url(#p3a6846d479)" style="fill: #e8eef7; stroke: #4c72b0; stroke-linejoin: miter"/>
+" clip-path="url(#peb0f1eebb6)" style="fill: #e8eef7; stroke: #4c72b0; stroke-linejoin: miter"/>
    </g>
    <g id="patch_3">
     <path d="M 216.5544 245.424 
@@ -43,7 +43,7 @@ L 302.3856 245.424
 L 302.3856 214.756 
 L 216.5544 214.756 
 z
-" clip-path="url(#p3a6846d479)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+" clip-path="url(#peb0f1eebb6)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
    </g>
    <g id="text_1">
     <text style="font-weight: 700; font-size: 10px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="64.6992" y="133.79725" transform="rotate(-0 64.6992 133.79725)">Megatron TP+SP</text>
@@ -67,7 +67,7 @@ z
   </g>
  </g>
  <defs>
-  <clipPath id="p3a6846d479">
+  <clipPath id="peb0f1eebb6">
    <rect x="11.88" y="27.96" width="660.24" height="334.56"/>
   </clipPath>
  </defs>

@@ -134,13 +134,7 @@ POSTS = {
     ],
 }
 
-DEFAULT_POSTS = [
-    "pipeline-parallelism-gpipe",
-    "data-parallelism-ddp-ring-allreduce",
-    "zero-redundancy-optimizer",
-    "tensor-parallelism-megatron",
-    "llm-training-series",
-]
+DEFAULT_POSTS = list(POSTS.keys())
 
 
 def _rank_row(ax, y: float, label: str, chunks: list[str], fills: list[str] | None = None) -> None:
