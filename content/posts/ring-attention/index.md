@@ -17,6 +17,7 @@ Megatron SP reduces replicated activation memory around tensor-parallel blocks.
 DeepSpeed Ulysses uses All-to-All to turn sequence shards into head shards for attention.
 Ring Attention changes the unit of work again.
 It asks each rank to keep a block of queries fixed, then circulate key/value blocks around a ring until every query block has seen every key/value block it needs.
+That is the core idea in *Ring Attention with Blockwise Transformers for Near-Infinite Context* ([arXiv:2310.01889](https://arxiv.org/abs/2310.01889)).
 
 This is the design you reach for when the context itself is too large to fit comfortably on one device.
 The mental model is distributed FlashAttention.
@@ -240,8 +241,20 @@ Rotate K/V.
 Update online softmax state.
 Choose chunks so communication hides.
 
+## Code
+
+Useful code paths to read:
+
+- [zhuzilin/ring-flash-attention](https://github.com/zhuzilin/ring-flash-attention): compact open implementation of ring-style FlashAttention.
+- [lucidrains/ring-attention-pytorch](https://github.com/lucidrains/ring-attention-pytorch): readable PyTorch implementation useful for following tensor movement.
+- [FlashAttention](https://github.com/Dao-AILab/flash-attention): baseline blockwise exact attention kernel family.
+
+The implementation detail to watch is online softmax state.
+Without the running max, running denominator, and output rescaling, the ring computes the wrong attention.
+
 ## References
 
 - Liu et al., [Ring Attention with Blockwise Transformers for Near-Infinite Context](https://arxiv.org/abs/2310.01889), 2023.
 - Dao et al., [FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness](https://arxiv.org/abs/2205.14135), 2022.
 - Dao, [FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning](https://arxiv.org/abs/2307.08691), 2023.
+- Code: [zhuzilin/ring-flash-attention](https://github.com/zhuzilin/ring-flash-attention), [lucidrains/ring-attention-pytorch](https://github.com/lucidrains/ring-attention-pytorch), [Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention).

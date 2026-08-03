@@ -15,7 +15,7 @@ cover:
 
 Megatron Context Parallel, usually shortened to CP, brings long-context attention into Megatron's hybrid-parallel world.
 It keeps the familiar tensor, pipeline, and data-parallel axes, then adds a context axis that shards the sequence.
-Inside that context group, attention behaves like a ring.
+Inside that context group, attention behaves like a ring, borrowing the same blockwise K/V circulation idea as Ring Attention ([arXiv:2310.01889](https://arxiv.org/abs/2310.01889)) while staying compatible with Megatron-style tensor and pipeline parallelism ([arXiv:2104.04473](https://arxiv.org/abs/2104.04473)).
 
 The interesting part is not only that CP uses a ring.
 The interesting part is that a naive ring is load-imbalanced for causal attention.
@@ -227,8 +227,22 @@ The challenge is maintaining a precise ownership story for every tensor as it cr
 Megatron CP is valuable because it does that for long-context attention inside Megatron's existing group structure.
 It is Ring Attention adapted to a hybrid-parallel system, with causal-mask load balancing and stream overlap added because production training needs both.
 
+## Code
+
+Useful code paths to read:
+
+- [Megatron-LM context parallel docs](https://github.com/NVIDIA/Megatron-LM/blob/main/docs/user-guide/features/context_parallel.md): user-facing description and enablement notes.
+- [Megatron-LM `TransformerConfig`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/transformer/transformer_config.py): `cp_comm_type` options such as `p2p`, `all_gather`, `a2a`, and `a2a+p2p`.
+- [Megatron-LM `model_parallel_config.py`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/model_parallel_config.py): `context_parallel_size` and related process-group configuration.
+- [Transformer Engine](https://github.com/NVIDIA/TransformerEngine): attention kernels and communication paths used by Megatron Core.
+
+Start with group construction and `cp_comm_type`.
+Those two choices decide whether a trace should look like P2P ring exchange, AllGather, Ulysses-style All-to-All, or a hierarchy.
+
 ## References
 
-- NVIDIA Megatron Core context parallel documentation.
+- NVIDIA Megatron Core, [Context Parallel Package](https://docs.nvidia.com/megatron-core/developer-guide/0.15.0/api-guide/context_parallel.html).
 - Liu et al., [Ring Attention with Blockwise Transformers for Near-Infinite Context](https://arxiv.org/abs/2310.01889), 2023.
 - Korthikanti et al., [Reducing Activation Recomputation in Large Transformer Models](https://arxiv.org/abs/2205.05198), 2022.
+- Narayanan et al., [Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM](https://arxiv.org/abs/2104.04473), 2021.
+- Code: [NVIDIA Megatron-LM](https://github.com/NVIDIA/Megatron-LM), [context parallel docs](https://github.com/NVIDIA/Megatron-LM/blob/main/docs/user-guide/features/context_parallel.md), [`transformer_config.py`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/transformer/transformer_config.py), [NVIDIA Transformer Engine](https://github.com/NVIDIA/TransformerEngine).

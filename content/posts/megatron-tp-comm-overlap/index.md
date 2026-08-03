@@ -17,6 +17,7 @@ Once Megatron SP is enabled, tensor-parallel communication often appears as AllG
 That is a memory win because activations can stay sequence-sharded between tensor-parallel regions.
 It also creates a scheduling question.
 Can the collectives be hidden under GEMM work?
+That question sits directly on top of Megatron's tensor/sequence-parallel training path ([arXiv:2104.04473](https://arxiv.org/abs/2104.04473), [arXiv:2205.05198](https://arxiv.org/abs/2205.05198)).
 
 This post is about that scheduling question.
 It complements [Megatron tensor parallelism](../tensor-parallelism-megatron/) and [Megatron SP](../sequence-parallelism-megatron-sp/).
@@ -231,8 +232,20 @@ The common lesson is that collectives are not only bandwidth costs.
 They are dependency edges.
 Performance work is often the process of replacing one coarse dependency edge with several smaller ones that the GPU and network can run around.
 
+## Code
+
+Useful code paths to read:
+
+- [Megatron-LM argument definitions](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/training/arguments.py): flags such as `tp_comm_overlap` and related overlap controls.
+- [Megatron-LM Transformer config](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/transformer/transformer_config.py): model-layer configuration that flows into Transformer Engine.
+- [Transformer Engine PyTorch module base](https://github.com/NVIDIA/TransformerEngine/blob/main/transformer_engine/pytorch/module/base.py): user-buffer initialization hooks such as `initialize_ub`.
+- [Megatron Bridge communication-overlap docs](https://docs.nvidia.com/nemo/megatron-bridge/0.1.0/training/communication-overlap.html): practical presets and requirements for TP overlap.
+
+When reading the code, keep buffer ownership separate from collective type.
+Most bugs are not "wrong collective"; they are "right collective, launched too late or using a buffer compute still owns."
+
 ## References
 
-- NVIDIA Megatron-LM and Transformer Engine communication-overlap implementations and configuration flags.
 - Narayanan et al., [Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM](https://arxiv.org/abs/2104.04473), 2021.
 - Korthikanti et al., [Reducing Activation Recomputation in Large Transformer Models](https://arxiv.org/abs/2205.05198), 2022.
+- Code: [NVIDIA Megatron-LM](https://github.com/NVIDIA/Megatron-LM), [`arguments.py`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/training/arguments.py), [NVIDIA Transformer Engine](https://github.com/NVIDIA/TransformerEngine), [`base.py`](https://github.com/NVIDIA/TransformerEngine/blob/main/transformer_engine/pytorch/module/base.py), [Megatron Bridge communication overlap docs](https://docs.nvidia.com/nemo/megatron-bridge/0.1.0/training/communication-overlap.html).

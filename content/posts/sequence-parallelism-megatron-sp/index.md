@@ -19,7 +19,7 @@ After the weights are split, many activations are still replicated on every tens
 For short contexts this is tolerable.
 For long contexts it becomes one of the reasons training throughput collapses into activation checkpointing.
 
-Megatron sequence parallelism, usually shortened to Megatron SP, is a targeted fix.
+Megatron sequence parallelism, usually shortened to Megatron SP, is a targeted fix from *Reducing Activation Recomputation in Large Transformer Models* ([arXiv:2205.05198](https://arxiv.org/abs/2205.05198)).
 It does not replace tensor parallelism.
 It keeps Megatron's column-parallel and row-parallel linear layers, then shards the sequence-local regions that tensor parallelism had left replicated.
 The trick is small enough to miss and important enough to change the memory budget of a whole Transformer block.
@@ -207,8 +207,20 @@ All four methods cut along the sequence dimension somewhere.
 They do it for different bottlenecks.
 Megatron SP's bottleneck is replicated activation memory around a TP block.
 
+## Code
+
+Useful code paths to read:
+
+- [Megatron-LM `megatron/core/tensor_parallel/`](https://github.com/NVIDIA/Megatron-LM/tree/main/megatron/core/tensor_parallel): tensor-parallel layers and mapping helpers.
+- [Megatron-LM `mappings.py`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/tensor_parallel/mappings.py): `gather_from_sequence_parallel_region()` and `reduce_scatter_to_sequence_parallel_region()`.
+- [Megatron Core tensor-parallel mapping docs](https://docs.nvidia.com/megatron-core/developer-guide/latest/apidocs/core/core.tensor_parallel.mappings.html): public API descriptions for the AG/RS autograd wrappers.
+- [Megatron-LM `transformer/`](https://github.com/NVIDIA/Megatron-LM/tree/main/megatron/core/transformer): where the mapping helpers meet Transformer layers.
+
+Read these files with tensor lifetime in mind.
+The key question is whether a saved activation is full sequence or `sequence / tp_size`.
+
 ## References
 
 - Korthikanti et al., [Reducing Activation Recomputation in Large Transformer Models](https://arxiv.org/abs/2205.05198), 2022.
 - Narayanan et al., [Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM](https://arxiv.org/abs/2104.04473), 2021.
-- NVIDIA Megatron-LM and Megatron Core documentation for tensor parallel and sequence parallel training.
+- Code: [NVIDIA Megatron-LM](https://github.com/NVIDIA/Megatron-LM), [`megatron/core/tensor_parallel/`](https://github.com/NVIDIA/Megatron-LM/tree/main/megatron/core/tensor_parallel), [`mappings.py`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/tensor_parallel/mappings.py), [Megatron Core mapping docs](https://docs.nvidia.com/megatron-core/developer-guide/latest/apidocs/core/core.tensor_parallel.mappings.html).

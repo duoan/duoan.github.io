@@ -17,7 +17,7 @@ Megatron SP is a careful memory optimization around an existing tensor-parallel 
 DeepSpeed Ulysses starts from a different question.
 What if each device owns a sequence slice most of the time, but attention temporarily wants each device to own a head slice instead?
 
-The answer is an All-to-All transpose.
+The answer in DeepSpeed Ulysses is an All-to-All transpose ([arXiv:2309.14509](https://arxiv.org/abs/2309.14509)).
 Before attention, every rank has all heads for a subset of tokens.
 After All-to-All, every rank has all tokens for a subset of heads.
 That one layout change lets local attention run per head while the rest of the layer can remain sequence-sharded.
@@ -219,8 +219,20 @@ In the sequence-parallelism family, Ulysses is the All-to-All transpose design.
 It is compact, understandable, and useful.
 It is also one piece of a broader toolkit.
 
+## Code
+
+Useful code paths to read:
+
+- [DeepSpeed `deepspeed/sequence/layer.py`](https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/sequence/layer.py): `DistributedAttention` and the sequence-parallel All-to-All wrappers.
+- [DeepSpeed sequence tutorial](https://github.com/deepspeedai/DeepSpeed/blob/master/docs/_tutorials/ds-sequence.md): integration notes for replacing a local attention module.
+- [DeepSpeed runtime Ulysses adapter](https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py): Hugging Face-oriented Ulysses SP attention and data-loader adapters.
+- [Megatron-DeepSpeed](https://github.com/deepspeedai/Megatron-DeepSpeed): common integration target for Ulysses-style long-sequence training.
+
+Trace the two All-to-All calls first.
+One converts sequence shards into head shards; the other converts head shards back into sequence shards.
+
 ## References
 
 - Jacobs et al., [DeepSpeed Ulysses: System Optimizations for Enabling Training of Extreme Long Sequence Transformer Models](https://arxiv.org/abs/2309.14509), 2023.
 - Rajbhandari et al., [ZeRO: Memory Optimizations Toward Training Trillion Parameter Models](https://arxiv.org/abs/1910.02054), 2020.
-- DeepSpeed sequence parallelism and ZeRO documentation.
+- Code: [DeepSpeed](https://github.com/deepspeedai/DeepSpeed), [`deepspeed/sequence/layer.py`](https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/sequence/layer.py), [DeepSpeed sequence tutorial](https://github.com/deepspeedai/DeepSpeed/blob/master/docs/_tutorials/ds-sequence.md), [`ulysses_sp.py`](https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/sequence_parallel/ulysses_sp.py).

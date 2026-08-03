@@ -22,6 +22,7 @@ The current steady-state model is intra-layer partitioning.
 Each parameter is flattened, padded if necessary, and split across data-parallel ranks.
 Before forward or backward compute needs that parameter, ranks AllGather the full parameter.
 After gradients are produced, ranks ReduceScatter gradients back to the owning shards.
+That is the operational reading of ZeRO-3 from the ZeRO paper ([arXiv:1910.02054](https://arxiv.org/abs/1910.02054)) and the current DeepSpeed runtime.
 
 This post is a correction, not a complaint.
 The wrong diagram spread because early explanations, papers, videos, and later code evolution did not line up cleanly.
@@ -243,8 +244,17 @@ Use profiling to decide whether the extra gathers and scatters are hidden well e
 The memorable layer-broadcast diagram did its job as an introduction.
 For engineering work, replace it with intra-layer 1D partitioning and the AG/RS timeline.
 
+## Code
+
+- [DeepSpeed `deepspeed/runtime/zero/stage3.py`](https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/zero/stage3.py): stage-3 parameter coordination, gather, release, and gradient partitioning.
+- [DeepSpeed ZeRO runtime directory](https://github.com/deepspeedai/DeepSpeed/tree/master/deepspeed/runtime/zero): shared partitioning, offload, and parameter-management machinery.
+- [Microsoft ZeRO blog](https://www.microsoft.com/en-us/research/blog/zero-deepspeed-new-system-optimizations-enable-training-models-with-over-100-billion-parameters/): useful historical explanation, but do not treat the animation as the current tensor-lifetime contract.
+- [DeepSpeed ZeRO documentation](https://www.deepspeed.ai/tutorials/zero/): configuration and user-facing stage descriptions.
+
+Read `stage3.py` for flattened partitions and collectives; use the blog animation only as historical context for why the misconception is memorable.
+
 ## References
 
 - Rajbhandari et al., [ZeRO: Memory Optimizations Toward Training Trillion Parameter Models](https://arxiv.org/abs/1910.02054), 2020.
 - Rajbhandari et al., [ZeRO-Infinity: Breaking the GPU Memory Wall for Extreme Scale Deep Learning](https://arxiv.org/abs/2104.07857), 2021.
-- DeepSpeed runtime code and documentation for ZeRO-3 parameter partitioning, prefetch, and gradient partitioning.
+- Code: [DeepSpeed](https://github.com/deepspeedai/DeepSpeed), [`deepspeed/runtime/zero/stage3.py`](https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/zero/stage3.py), [`deepspeed/runtime/zero/`](https://github.com/deepspeedai/DeepSpeed/tree/master/deepspeed/runtime/zero), [DeepSpeed ZeRO tutorial](https://www.deepspeed.ai/tutorials/zero/), [Microsoft ZeRO blog](https://www.microsoft.com/en-us/research/blog/zero-deepspeed-new-system-optimizations-enable-training-models-with-over-100-billion-parameters/).
