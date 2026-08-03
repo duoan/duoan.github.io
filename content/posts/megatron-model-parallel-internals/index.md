@@ -13,52 +13,47 @@ cover:
 
 # Megatron Internals II: Column/Row Parallel Linear and Vocab Parallel Embedding
 
-Tensor parallelism in Megatron is not a generic "split the model" switch.
-It is a small set of layer contracts.
-Each contract says which dimension of a tensor is local, which collective completes the math, and which gradient path must communicate.
-Once those contracts are clear, `ParallelSelfAttention`, `ParallelMLP`, vocabulary-parallel embeddings, and vocabulary-parallel cross entropy are variations on the same theme.
+Tensor parallelism is not "split every tensor somehow." In Megatron, it is a small set of layer contracts: which dimension is local, which collective completes the dense math, and which gradient path communicates.
+
+The original [Megatron-LM paper](https://arxiv.org/abs/1909.08053) is still the cleanest starting point: split transformer matrix multiplies so each GPU does useful dense GEMM, then communicate only where the algebra requires it.
+This post walks the implementation-level contracts behind `ColumnParallelLinear`, `RowParallelLinear`, `VocabParallelEmbedding`, and parallel cross entropy.
 
 ## TL;DR
 
-- Megatron's tensor parallel layers split weight matrices so each rank computes a valid slice of the dense operation.
-- `ColumnParallelLinear` splits output features; forward can optionally all-gather output shards, while backward all-reduces input gradients.
-- `RowParallelLinear` splits input features; forward all-reduces partial outputs, while backward can keep input-gradient shards local.
+- `ColumnParallelLinear` splits output features. Forward can leave output shards local; backward all-reduces input gradients.
+- `RowParallelLinear` splits input features. Forward all-reduces partial outputs; backward can keep input-gradient shards local.
 - The common `f` and `g` operators are identity in one direction and all-reduce in the other direction.
-- Parallel attention uses column-parallel QKV projections, local attention heads, then a row-parallel output projection.
-- Vocabulary-parallel embedding and cross entropy avoid materializing full vocabulary tensors on each rank.
-- This post builds on [Part I](../megatron-distributed-init/) and sets up the optimizer discussion in [Part III](../megatron-mixed-precision-training/).
+- Attention uses column-parallel QKV, local heads, and a row-parallel output projection.
+- The MLP uses column-parallel expansion, local activation, and row-parallel contraction.
+- `VocabParallelEmbedding` shards vocabulary rows and all-reduces embeddings, so no rank stores the full table.
+- Vocab-parallel cross entropy reduces max, denominator, and target logit instead of all-gathering full logits.
+- For the rank groups underneath these layers, start with [Megatron Internals I](../megatron-distributed-init/). For the broader tensor-parallel overview, see [Tensor Parallelism in Megatron](../tensor-parallelism-megatron/).
 
-## 1. Why tensor parallelism is layer-specific
+## 1. Why tensor parallelism lives inside layers
 
-A transformer is mostly linear algebra.
-That sounds easy to shard until you ask which tensor dimension is being summed.
-For a linear layer:
+A transformer block is mostly matrix multiplication, but different matrix dimensions have different meanings. For a linear layer:
 
 ```text
 Y = X W
 ```
 
-there are two obvious splits.
-Split `W` by columns and each rank owns different output features.
-Split `W` by rows and each rank owns different input features, so its matrix product is only a partial sum.
-Megatron uses both.
-The trick is arranging them so one layer's output layout is the next layer's input layout.
-That is why tensor parallelism lives inside custom modules rather than outside as a wrapper.
+you can split `W` two obvious ways:
 
-## 2. Two autograd operators: `f` and `g`
+- split columns: each rank owns different output features;
+- split rows: each rank owns different input features and computes a partial sum.
 
-Megatron papers describe two conceptual operators.
-They are easier to remember by direction:
+Both are useful. Neither works as a generic wrapper around arbitrary modules because the next layer must know whether it receives a full tensor or a shard. That is why Megatron implements tensor parallelism in custom modules rather than trying to shard an already-built dense model.
+
+## 2. The two autograd operators
+
+Megatron papers describe two conceptual operators:
 
 ```text
 f: forward identity, backward all-reduce
 g: forward all-reduce, backward identity
 ```
 
-In implementation, these are custom autograd functions over the tensor-model-parallel process group.
-Their job is not to change math.
-Their job is to put communication on the side of the graph where it is needed.
-That lets adjacent layers avoid unnecessary gather-scatter cycles.
+They are not magic math. They are custom autograd communication placements whose job is to avoid gather-scatter noise between adjacent layers. If a tensor is already sharded in the layout the next operation wants, keep it sharded. If the algebra needs a sum across shards, all-reduce exactly there.
 
 ## 3. ColumnParallelLinear
 
@@ -70,8 +65,9 @@ Y_i = X W_i
 Y = concat(Y_i)
 ```
 
-Each TP rank owns one column shard of `W`.
-Given a full input `X`, each rank can compute its local output shard independently.
+Every TP rank receives the full input `X`.
+Each rank owns one column shard of `W`.
+Each rank computes one output-feature shard.
 
 ![ColumnParallelLinear: split output features](column_parallel_linear.svg)
 
@@ -86,18 +82,17 @@ class ColumnParallelLinear(nn.Module):
         return y_local
 ```
 
-The forward pass has two modes.
-If the next layer can consume sharded outputs, Megatron leaves `Y_i` local.
+The forward mode depends on the consumer.
+If the next operation can consume sharded activations, Megatron leaves `Y_i` local.
 If a non-parallel consumer needs the full hidden dimension, it all-gathers.
-The backward pass is where input gradients need care:
+
+Backward needs the sum:
 
 ```text
 dX = sum_i dY_i W_i^T
 ```
 
-Every rank can compute a partial `dX`.
-Those partials must be all-reduced across the TP group.
-This is the backward side of `f`.
+Each rank can compute one partial `dX`. The full input gradient is the all-reduce of those partials. That is the backward side of `f`.
 
 ## 4. RowParallelLinear
 
@@ -109,112 +104,90 @@ W = [W_0; W_1; ...; W_{p-1}]
 Y = sum_i X_i W_i
 ```
 
-Each rank receives or already owns one input shard.
+Each rank receives or creates one input-feature shard.
 It computes a partial output with the full output dimension.
-Then ranks all-reduce those partial outputs.
+Then the TP group all-reduces those partial outputs.
 
 ![RowParallelLinear: split input features](row_parallel_linear.svg)
 
-Sketch:
+A minimal sketch:
 
 ```python
 class RowParallelLinear(nn.Module):
     def forward(self, x):
-        x_local = scatter_last_dim(x, tp_group) if self.input_is_parallel is False else x
+        x_local = x if self.input_is_parallel else scatter_last_dim(x, tp_group)
         y_partial = x_local @ self.weight_local
         return all_reduce(y_partial, tp_group)
 ```
 
-The communication moved from backward to forward.
-That is `g`: forward all-reduce, backward identity.
-The two layer types pair naturally.
-In an MLP, the first projection expands `H -> 4H` and is column-parallel.
-The second projection contracts `4H -> H` and is row-parallel.
-The intermediate activation stays sharded, so the pair pays one all-reduce at the end instead of gather plus reduce.
+The communication moved from backward to forward. That is `g`: forward all-reduce, backward identity.
 
-## 5. Why the pair preserves dense semantics
+## 5. Why the column/row pair is efficient
 
-For a dense MLP:
+The transformer MLP has an expansion and a contraction:
 
 ```text
 Z = GELU(X W_up)
 Y = Z W_down
 ```
 
-Megatron computes:
+Megatron computes the dense-equivalent result as:
 
 ```text
 Z_i = GELU(X W_up_i)
 Y_i = Z_i W_down_i
-Y = all_reduce(sum partial Y_i)
+Y = all_reduce_i(Y_i)
 ```
 
-This is exactly the dense result when the split dimensions line up.
 No approximation is introduced.
-The only difference is where the intermediate tensor lives.
-That distinction matters for memory.
-No TP rank stores the full `4H` activation unless a later operation explicitly gathers it.
+The intermediate `Z_i` stays sharded.
+That matters because `Z` is usually several times wider than the hidden state.
+Gathering it between the two MLP projections would burn memory and bandwidth for no algebraic reason.
 
-## 6. Seeds under tensor parallelism
+This is the pattern you should look for in tensor-parallel code:
 
-Part I introduced the seed invariant: DP replicas match, model-parallel shards do not accidentally duplicate.
-Tensor-parallel layers make the reason concrete.
-If column shards of `W_up` use the same random stream, then `W_0` and `W_1` can become identical.
-That does not equal "initialize a dense matrix and split it."
-Megatron solves this with model-parallel RNG streams and shard-aware initializers.
-There are two common initialization modes:
+1. split where independent work exists;
+2. keep the large intermediate local;
+3. reduce when the math becomes a sum.
 
-- initialize the full tensor on CPU, then scatter shards;
-- initialize each local shard directly on GPU with a model-parallel seed.
+## 6. Parallel self-attention
 
-The second is faster and avoids large CPU tensors, but only if the seed logic preserves dense-equivalent statistics.
-Dropout follows the same rule.
-Where ranks hold different tensor slices, masks should represent the corresponding slice of the dense mask.
-Where ranks hold replicated values after an all-reduce, dropout can use the same stream across DP replicas.
-
-## 7. Parallel self-attention
-
-Attention combines the layer contracts.
-A transformer attention block usually computes:
+Attention uses the same contracts.
+A typical attention block computes:
 
 ```text
 Q, K, V = X W_qkv
 O       = attention(Q, K, V) W_o
 ```
 
-Megatron makes `W_qkv` column-parallel.
+Megatron makes the QKV projection column-parallel.
 Each rank owns a subset of attention heads.
-Those heads can run softmax attention locally because each head is independent once Q, K, and V are formed.
-The output projection `W_o` is row-parallel.
-It sums the per-rank head contributions back into the full hidden dimension.
+Those heads can run attention locally because heads are independent once Q, K, and V are formed.
+The output projection is row-parallel and all-reduces the head contributions back into the hidden dimension.
 
 ![Parallel self-attention alternates split and sync points](parallel_attention_block.svg)
 
-The resulting pattern is:
+The sequence is:
 
 1. full hidden state enters the block;
-2. QKV projection produces local head shards;
-3. attention runs locally per shard;
-4. output projection all-reduces partial hidden states.
+2. column-parallel QKV creates local head shards;
+3. attention runs locally on those heads;
+4. row-parallel output projection all-reduces partial hidden states.
 
-That is why attention head count must be compatible with TP size.
-If `num_heads % tp_size != 0`, local head assignment is not regular.
-Modern variants such as grouped-query attention change the constants, but the sharding principle remains: split independent heads, reduce when hidden features are summed.
+This is why head counts must divide cleanly by TP size.
+Grouped-query attention changes how K/V heads are shared, but the same question remains: which heads are local, and where does the hidden dimension need a sum?
 
-## 8. VocabParallelEmbedding
+## 7. VocabParallelEmbedding
 
-The embedding matrix can be enormous:
+The embedding table can be one of the largest tensors in a language model:
 
 ```text
 E: vocab_size x hidden_size
 ```
 
-Sharding by hidden dimension would make lookup awkward.
-Megatron shards by vocabulary rows.
-Each rank owns a contiguous token id range.
-Every rank receives the same token ids, masks out ids outside its range, looks up local embeddings for ids it owns, and returns zeros for the rest.
-An all-reduce sums the result.
-Only the rank that owns a token id contributes a non-zero vector.
+Megatron shards it by vocabulary rows.
+Each TP rank owns a contiguous token-id range.
+Every rank receives the token ids, masks out ids outside its range, looks up local rows, zeros the non-owned positions, and all-reduces the result.
 
 ![VocabParallelEmbedding: shard rows by token id range](vocab_parallel_embedding.svg)
 
@@ -230,48 +203,74 @@ def forward(input_ids):
     return all_reduce(out, tp_group)
 ```
 
-The all-reduce is cheap compared with gathering the full embedding table.
-It also keeps optimizer state for embedding rows sharded across TP ranks.
+Only the rank that owns a token contributes a non-zero vector.
+The all-reduce is cheaper than keeping the full embedding table and optimizer state on every TP rank.
 
-## 9. Vocab-parallel logits
+## 8. Vocab-parallel cross entropy
 
-The output projection to vocabulary is the mirror image.
-Instead of producing logits for every token over the full vocabulary on every rank, each rank produces logits for its vocabulary shard.
-The naive next step would gather all logits and run cross entropy.
-Megatron avoids that.
-Cross entropy only needs:
+The output projection mirrors the input embedding.
+Each rank produces logits for its vocabulary shard.
+The naive move is to all-gather logits and run ordinary cross entropy.
+That is usually the wrong move.
+
+Cross entropy needs only three global quantities per token:
 
 - the global maximum logit for numerical stability;
 - the global sum of exponentials;
-- the target logit for the label token.
-
-Those are scalar reductions over the vocabulary dimension.
+- the target logit for the true token id.
 
 ![Vocab-parallel cross entropy: reduce scalars, not logits](parallel_cross_entropy.svg)
 
-The stable algorithm computes a local max, reduces the global max, exponentiates only local logits, reduces the denominator, and reduces the target logit from the shard that owns the label id.
-The gradient is local except for the same target-token ownership test.
-This design avoids a `batch * sequence * vocab` all-gather.
-For large vocabularies, that is the difference between a scalable output layer and a memory wall.
+The stable algorithm is:
 
-## 10. Backward pass summary
+1. compute local max over local vocab logits;
+2. all-reduce max across TP ranks;
+3. subtract global max and exponentiate local logits;
+4. all-reduce the denominator;
+5. pick the target logit only on the rank that owns the target token;
+6. reduce that target logit;
+7. compute loss and local vocab gradients.
 
-A useful way to audit a tensor-parallel module is to write both directions:
+This avoids a `batch * sequence * vocab` all-gather.
+For large vocabularies, that is the difference between a normal output layer and a memory wall.
+
+## 9. Backward-pass audit table
+
+When reviewing a tensor-parallel module, write the forward and backward communication down explicitly:
 
 | Module | Forward communication | Backward communication |
 |---|---|---|
-| ColumnParallelLinear | optional all-gather | all-reduce `dX` |
-| RowParallelLinear | all-reduce output | usually none for sharded `dX` |
-| VocabParallelEmbedding | all-reduce embeddings | gradients stay with vocab rows |
-| VocabParallelCrossEntropy | max/sum reductions | local vocab gradients plus reductions |
+| `ColumnParallelLinear` | Optional all-gather | All-reduce `dX` |
+| `RowParallelLinear` | All-reduce output | Usually none for sharded `dX` |
+| `VocabParallelEmbedding` | All-reduce embeddings | Gradients stay with owned vocab rows |
+| `VocabParallelCrossEntropy` | Max, denominator, target-logit reductions | Local vocab gradients plus small reductions |
 
-This table also explains why activation checkpointing with TP must restore RNG and tensor layout exactly.
-The recomputed forward pass must produce tensors with the same sharding as the original pass.
-Otherwise backward collectives operate on the wrong shape.
+This table also explains why activation checkpointing with TP must restore both RNG state and tensor layout.
+The recomputed forward pass must produce the same shard shapes as the original forward pass.
+Otherwise backward collectives run on the wrong tensors.
+
+## 10. The useful mental model
+
+Megatron tensor parallelism is dense math with local shards. It works because the split dimensions match the algebra:
+
+- column split means independent output features;
+- row split means partial sums over input features;
+- vocab split means independent token-id rows;
+- parallel cross entropy means reducing the few global scalars the loss actually needs.
+
+The code looks complicated because it must handle sequence parallelism, async communication, fused kernels, and initialization. The core idea is still small: keep tensors sharded while the next operation can consume the shard, and communicate only when the dense equation requires a concat or a sum.
+
+## Code
+
+- Megatron tensor-parallel layers: [`megatron/core/tensor_parallel/layers.py`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/tensor_parallel/layers.py).
+- Tensor-parallel communication mappings and custom autograd functions: [`megatron/core/tensor_parallel/mappings.py`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/tensor_parallel/mappings.py).
+- Vocab-parallel cross entropy: [`megatron/core/tensor_parallel/cross_entropy.py`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/tensor_parallel/cross_entropy.py).
+- Full tensor-parallel package: [`megatron/core/tensor_parallel/`](https://github.com/NVIDIA/Megatron-LM/tree/main/megatron/core/tensor_parallel).
+- Megatron process groups used by these layers: [`megatron/core/parallel_state.py`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/parallel_state.py).
 
 ## References
 
 - Shoeybi et al., [Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism](https://arxiv.org/abs/1909.08053), 2019.
 - Narayanan et al., [Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM](https://arxiv.org/abs/2104.04473), 2021.
 - Vaswani et al., [Attention Is All You Need](https://arxiv.org/abs/1706.03762), NeurIPS 2017.
-- NVIDIA, [Megatron-LM](https://github.com/NVIDIA/Megatron-LM) and Megatron-Core documentation for tensor-parallel layers.
+- Korthikanti et al., [Reducing Activation Recomputation in Large Transformer Models](https://arxiv.org/abs/2205.05198), 2022.

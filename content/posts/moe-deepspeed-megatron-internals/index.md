@@ -13,62 +13,59 @@ cover:
 
 # MoE Internals: DeepSpeed-Megatron Expert Parallel Implementation
 
-DeepSpeed-Megatron MoE is interesting because it does not put every MoE decision in Megatron's base distributed initialization.
-Megatron builds the usual TP, PP, and DP topology.
-The expert-parallel topology is attached later, when `deepspeed.initialize()` walks the model and gives MoE modules their DeepSpeed-specific process groups.
-This post explains that implementation shape conceptually: where EP groups come from, what `MoELayer` contains, and how this differs from Megatron's own SwitchMLP style.
-For the routing and all-to-all foundation, start with [MoE Parallelism Principles](../moe-expert-parallelism-principles/).
+DeepSpeed-Megatron MoE is easy to misread if you only inspect one initialization function. Megatron builds the usual TP, PP, and DP topology. DeepSpeed then wraps the model, finds MoE modules, and gives those modules expert-parallel groups. The topology is split across the training framework and the MoE layer implementation.
+
+This post connects the pieces: `deepspeed.initialize()`, EP groups, expert-DP groups, `MoELayer`, and the difference between a DeepSpeed MoE wrapper and a Megatron-integrated SwitchMLP-style module.
+For routing, capacity, and All-to-All fundamentals, start with [MoE Parallelism Principles](../moe-expert-parallelism-principles/).
 
 ## TL;DR
 
-- DeepSpeed-Megatron reuses Megatron's training skeleton, but expert-parallel setup is triggered inside DeepSpeed model wrapping.
-- Base Megatron initialization creates TP, PP, and DP groups; DeepSpeed MoE modules create EP and expert-DP groups when `set_deepspeed_parallelism` is called.
-- The MoE layer wraps a gate, dispatch/combine metadata, expert modules, and All-to-All movement.
-- In Megatron-DeepSpeed, an expert is often a `ParallelMLP`, so expert compute can still use tensor-parallel layer contracts.
-- DeepSpeed's MoE path is GShard-like: TopK gate, capacity, token dropping or padding, All-to-All, local experts, and combine.
-- Megatron's SwitchMLP path is a separate design line, with different assumptions about routing and integration.
+- Base Megatron initialization creates dense-model topology: tensor parallel, pipeline parallel, data parallel, and helper groups.
+- DeepSpeed-Megatron adds MoE topology during DeepSpeed model wrapping, not only in Megatron's base parallel-state setup.
+- `deepspeed.initialize()` builds the DeepSpeed engine; MoE modules expose hooks such as `set_deepspeed_parallelism` so expert groups can be attached.
+- An EP group owns different experts and runs All-to-All token dispatch.
+- An expert-DP group owns equivalent expert shards across data replicas and synchronizes expert gradients.
+- DeepSpeed `MoELayer` is GShard-like: gate, capacity, dispatch metadata, All-to-All, local experts, All-to-All back, combine.
+- SwitchMLP-style integration keeps more MoE behavior inside Megatron model code and usually follows a simpler top-1 routing shape inspired by [Switch Transformer](https://arxiv.org/abs/2101.03961).
+- For optimizer-state sharding around this stack, see [ZeRO Redundancy Optimizer](../zero-redundancy-optimizer/).
 
 ## 1. The implementation boundary
 
-The base Megatron flow is:
+A normal Megatron training flow is:
 
 1. initialize distributed process groups;
 2. build the model for the current rank;
 3. build optimizer and scheduler;
 4. build data iterators;
-5. run training.
+5. run the training loop.
 
-DeepSpeed-Megatron keeps that skeleton.
-The change is that model construction may create MoE modules, and DeepSpeed wrapping may attach extra parallel metadata to those modules.
-This makes the implementation boundary easy to miss.
-If you inspect only Megatron's distributed initialization, you may find TP, PP, and DP groups but no complete EP topology.
-That does not mean EP is absent.
-It means DeepSpeed defers the MoE-specific part until it has the model modules in hand.
+DeepSpeed-Megatron keeps that skeleton. The MoE difference is that transformer layer construction may insert MoE modules, and DeepSpeed wrapping may attach MoE-specific parallel metadata later.
+
+That boundary matters. If you inspect only Megatron's distributed initialization, you may see TP, PP, and DP groups but no complete EP topology. That does not mean EP is absent; it means DeepSpeed owns part of the MoE setup.
 
 ![DeepSpeed-Megatron MoE initialization flow](moe_init_flow.svg)
 
-## 2. Why defer EP setup?
+## 2. Why EP setup is deferred
 
-Base TP, PP, and DP groups are global training topology.
-Every transformer layer cares about them.
-Expert-parallel groups are needed only by MoE modules.
-DeepSpeed owns the MoE module implementation, so it can attach EP groups when it wraps the model:
+Dense TP, PP, and DP groups are global. Every transformer layer cares about them. Expert-parallel groups are needed only by MoE modules. DeepSpeed owns the MoE module implementation, so it can attach expert-parallel state when the model is wrapped:
 
 ```python
+engine, optimizer, _, _ = deepspeed.initialize(
+    model=model,
+    model_parameters=model.parameters(),
+    config=ds_config,
+)
+
 for module in model.modules():
     if hasattr(module, "set_deepspeed_parallelism"):
         module.set_deepspeed_parallelism(use_data_before_expert_parallel)
 ```
 
-This is a design choice, not a mathematical requirement.
-Megatron-Core style systems can build expert groups in the main parallel-state initialization.
-DeepSpeed's path keeps MoE behavior close to DeepSpeed's engine and module wrappers.
-The advantage is modularity.
-The cost is that understanding topology requires following both Megatron and DeepSpeed code paths.
+That loop is conceptual, not a promise about exact call-site shape. The point is the ownership boundary: Megatron creates the base model-parallel world, and DeepSpeed gives MoE modules the expert-parallel groups they need for routing and gradient synchronization. This modularity is useful, but it means you must read both Megatron-DeepSpeed and DeepSpeed MoE code to understand the full topology.
 
-## 3. Script-level knobs
+## 3. Launch knobs describe geometry
 
-A typical MoE launch config includes:
+A MoE training launch usually includes dense-model knobs and sparse-model knobs:
 
 ```text
 --tensor-model-parallel-size TP
@@ -82,46 +79,39 @@ A typical MoE launch config includes:
 --topk k
 ```
 
-`tensor-model-parallel-size` controls dense tensor splits and optionally expert-internal splits.
-`moe-expert-parallel-size` controls how many ranks cooperate to host a full expert set.
-`num-experts` controls how many experts each MoE layer contains.
-Capacity and auxiliary-loss knobs control router regularization and overflow behavior.
-These flags describe a geometry.
-The implementation turns that geometry into groups and tensor layouts.
+`TP` decides how dense matrix multiplies are split. `PP` decides which rank owns which transformer layers. `EP` decides how many ranks cooperate to host one expert set. `E` decides how many experts the MoE layer contains. Capacity and auxiliary-loss knobs decide how routing is regularized and bounded. These flags are not independent decorations; together they define tensor ownership and communication.
 
 ## 4. Base Megatron groups still matter
 
-Even when DeepSpeed attaches EP groups later, the base Megatron groups are still active.
-The attention block uses tensor-parallel collectives as described in [Megatron Internals II](../megatron-model-parallel-internals/).
-Pipeline stages still determine whether a rank owns early, middle, or late transformer layers as described in [Megatron Internals I](../megatron-distributed-init/).
-Mixed precision still needs distributed overflow checks and gradient clipping as described in [Megatron Internals III](../megatron-mixed-precision-training/).
-MoE adds an axis.
-It does not erase the others.
-That is why DeepSpeed-Megatron MoE code often feels layered:
+MoE adds an axis. It does not erase the others. The attention block still uses tensor-parallel collectives from [Megatron Internals II](../megatron-model-parallel-internals/). Pipeline stages still follow the rank mesh from [Megatron Internals I](../megatron-distributed-init/). Mixed precision still needs distributed overflow checks and clipping from [Megatron Internals III](../megatron-mixed-precision-training/).
+
+The stack looks like:
 
 ```text
 Megatron rank topology
   -> transformer layer construction
      -> DeepSpeed MoE module
-        -> expert parallel groups
+        -> expert-parallel groups
+        -> expert data-parallel groups
         -> all-to-all routing
 ```
 
+If a bug appears in MoE training, first ask which layer of this stack owns the failed tensor: dense hidden state, expert-routed activation, expert gradient, or optimizer state.
+
 ## 5. Where the MoE layer appears
 
-In a transformer layer, the dense MLP slot can be filled by different implementations:
+In a transformer layer, the dense MLP slot can be filled by:
 
 - a normal dense `ParallelMLP`;
-- a DeepSpeed MoE module wrapping expert MLPs;
-- a Megatron SwitchMLP-style module in codebases that include it.
+- a DeepSpeed MoE wrapper around expert MLPs;
+- a Megatron-integrated SwitchMLP-style module in codebases that carry that path.
 
-The DeepSpeed path is selected when the layer has more than one expert and the configuration requests DeepSpeed MoE.
 Conceptually:
 
 ```python
 if num_experts <= 1:
     mlp = ParallelMLP(config)
-elif use_megatron_switch:
+elif use_switch_mlp:
     mlp = SwitchMLP(config)
 else:
     expert = ParallelMLP(config, moe=True)
@@ -137,96 +127,80 @@ else:
     )
 ```
 
-The important part is that the expert can itself be a Megatron-style parallel MLP.
-So the sparse MoE wrapper and dense TP layer contracts compose.
+The important detail is that the expert can itself be a Megatron-style parallel MLP. The sparse wrapper and dense tensor-parallel layer contracts compose, which is powerful but makes group ownership more subtle.
 
-## 6. Inside `MoELayer`
+## 6. Inside DeepSpeed `MoELayer`
 
 A GShard-like MoE layer needs four logical pieces:
 
 1. a gate that computes expert scores and top-k assignments;
-2. metadata that maps tokens to expert-capacity slots;
-3. expert modules that compute local FFNs;
-4. dispatch and combine collectives.
+2. routing metadata that maps tokens to expert-capacity slots;
+3. expert modules that run local FFNs;
+4. dispatch and combine communication.
 
 ![DeepSpeed MoELayer structure](moe_layer_structure.svg)
 
-The gate outputs combine weights and a dispatch mask.
-The dispatch mask says which token goes to which expert slot.
-The combine weights say how returned expert outputs are weighted back into the original token order.
-This is the same conceptual flow as the principles post:
+The flow is:
 
 ```text
-hidden -> gate -> dispatch mask
+hidden -> gate -> dispatch metadata
        -> All-to-All -> local experts
        -> All-to-All -> combine -> output
 ```
 
-DeepSpeed can optionally use optimized dispatch implementations such as Tutel in some configurations, but the logical contract remains the same.
+This follows the systems recipe from [GShard](https://arxiv.org/abs/2006.16668). Top-k routing, capacity, padding or dropping, and auxiliary loss are not side features; they make the sparse layer executable on a cluster. DeepSpeed-MoE expands this into a runtime system in [DeepSpeed-MoE](https://arxiv.org/abs/2201.05596).
 
 ## 7. EP group versus expert-DP group
 
-Two group types are easy to confuse.
-An **EP group** contains ranks that own different experts for one MoE layer replica.
-It is used for token dispatch and combine.
-An **expert-DP group** contains ranks that own the same expert shard across data replicas.
-It is used for gradient synchronization of expert parameters.
+Two groups are easy to confuse. An **EP group** contains ranks that own different experts for one MoE layer replica; it moves activations for token dispatch and combine. An **expert-DP group** contains ranks that own the same expert shard across data replicas; it moves gradients to synchronize expert parameters.
 
 ![EP groups and DP groups answer different questions](ep_group_vs_dp.svg)
 
-A useful phrasing:
+A compact phrasing:
 
 ```text
 EP group:  route tokens across different experts.
 EDP group: synchronize gradients for the same expert.
 ```
 
-The same physical rank participates in both.
-The collectives happen at different times and move different tensors.
-Routing moves activations.
-Gradient synchronization moves parameter gradients.
+The same physical rank participates in both, but the groups answer different questions and run at different times.
 
 ## 8. The All-to-All path
 
-The DeepSpeed MoE forward path follows the standard sparse layer sequence.
-First, local hidden states are flattened from sequence and batch into a token dimension.
-Second, the gate computes top-k expert assignments and capacity positions.
-Third, tokens are permuted into expert-major order.
-Fourth, an All-to-All sends tokens to the ranks that own their experts.
-Fifth, local experts run.
-Sixth, another All-to-All sends outputs back.
-Seventh, combine weights reconstruct the original token order.
-The layout choices around steps three and seven matter.
-Bad permutation code can dominate small-expert MoE layers.
-Bad capacity choices can send mostly padding.
-Bad EP placement can push all traffic over the slowest network tier.
-These are the same "three walls" that modern MoE systems attack more aggressively in production: memory, communication, and compute efficiency.
-See [Large MoE Performance](../large-moe-from-sparsity-to-communication/) for that later optimization layer.
+The DeepSpeed MoE forward path is the standard sparse path:
+
+1. flatten local sequence and batch dimensions into tokens;
+2. run the gate and choose top-k experts;
+3. compute capacity positions and dispatch metadata;
+4. permute tokens into expert or destination order;
+5. All-to-All tokens to expert-owning ranks;
+6. run local expert FFNs;
+7. All-to-All expert outputs back;
+8. unpermute and combine outputs with gate weights.
+
+The layout choices around permutation matter. Small experts can be dominated by pack and unpack overhead. Bad capacity choices can send mostly padding. Bad EP placement can push the hot path over the slowest network tier.
+
+Those are the production walls covered in [Large MoE Performance](../large-moe-from-sparsity-to-communication/): memory, communication, and compute efficiency after sparsity.
 
 ## 9. Expert tensor parallelism
 
-If `enable_expert_tensor_parallelism` is set, each expert MLP can use tensor-parallel linear layers.
-That means an expert is not necessarily fully local to one rank.
-Instead, an expert can be spread across a TP subgroup inside or alongside EP.
-This composition is powerful but subtle.
-There are two levels of "parallel":
+If expert tensor parallelism is enabled, an expert FFN is not necessarily local to one rank. It can use the same column-parallel and row-parallel layers as dense Megatron MLPs.
+
+There are two levels of parallelism:
 
 - EP chooses which rank group owns which experts and routes tokens there.
 - TP splits matrix multiplies inside each expert.
 
-The expert's own forward pass may therefore include the column-parallel and row-parallel collectives from [Megatron Internals II](../megatron-model-parallel-internals/).
-The MoE wrapper must deliver expert inputs in the layout those expert modules expect.
+That means the MoE wrapper must deliver expert inputs in the layout expected by the expert MLP. Around the expert, the wrapper runs All-to-All; inside the expert, tensor-parallel layers may all-reduce or all-gather. The network does not care whether a collective came from EP or TP. If both hit the same links at the wrong time, they interfere.
 
 ## 10. Capacity and auxiliary loss in implementation terms
 
-The router returns more than expert ids.
-It returns tensors that make sparse routing executable.
-Common outputs include:
+The gate returns more than expert ids. Common outputs include:
 
 - `l_aux`: auxiliary load-balancing loss;
-- `combine_weights`: weights for final token reconstruction;
-- `dispatch_mask`: boolean or sparse metadata for token-to-slot placement;
-- expert counts or capacity metadata for dispatch.
+- `combine_weights`: weights used to reconstruct token outputs;
+- `dispatch_mask` or equivalent sparse routing metadata;
+- expert counts and capacity positions.
 
 The training loss becomes:
 
@@ -234,44 +208,66 @@ The training loss becomes:
 loss_total = loss_lm + moe_loss_coeff * l_aux
 ```
 
-The auxiliary loss is not an implementation detail.
-Without it, the router can collapse onto a few experts.
-Collapsed routing causes worse quality and worse systems behavior: overloaded experts, padding elsewhere, and imbalanced All-to-All.
-Capacity protects the system from unbounded shape growth.
-Auxiliary loss trains the model away from repeatedly hitting that guardrail.
+Auxiliary loss is not just regularization. It protects the system from router collapse: a few experts overload, other experts idle, and All-to-All becomes imbalanced. Capacity is the hard guardrail; auxiliary loss teaches the model to avoid leaning on that guardrail every step.
 
-## 11. Contrast with Megatron SwitchMLP
+## 11. `MoELayer` versus SwitchMLP-style integration
 
-Megatron's SwitchMLP-style path is conceptually closer to Switch Transformer top-1 routing.
-The DeepSpeed path is closer to GShard top-k MoE with DeepSpeed-owned dispatch and grouping.
-The difference is not just the value of `k`.
-It changes the module boundary:
+DeepSpeed `MoELayer` and Megatron SwitchMLP-style integration solve the same model problem with different ownership boundaries.
 
-- DeepSpeed MoE wraps an expert module and attaches DeepSpeed parallelism.
-- SwitchMLP tends to be integrated more directly into Megatron's model code.
-- DeepSpeed emphasizes engine-level wrapping and optional MoE-specific runtime features.
-- Megatron-integrated paths can keep more topology in one parallel-state system.
+DeepSpeed `MoELayer`:
 
-Neither style is universally better.
-DeepSpeed's modularity makes it easier to insert MoE into a Megatron training stack.
-Megatron-integrated MoE can be easier to reason about once the whole stack is standardized.
-For production-scale MoE, modern Megatron-Core designs go much further with specialized dispatchers, overlap, and parallel folding.
-That is beyond this internals post and belongs with the performance discussion.
+- wraps an expert module;
+- owns routing, dispatch, and combine;
+- attaches DeepSpeed EP and expert-DP groups;
+- fits naturally into `deepspeed.initialize()` and engine-level runtime features.
+
+SwitchMLP-style integration:
+
+- is usually closer to Switch Transformer's top-1 routing;
+- keeps more MoE logic in Megatron's transformer layer code;
+- can share more directly with Megatron parallel-state conventions;
+- has a smaller routing surface but less of DeepSpeed's MoE runtime machinery.
+
+Neither shape is universally better. The DeepSpeed path is modular and easy to insert into a Megatron stack. The Megatron-integrated path can be easier to reason about once the training system standardizes on one parallel-state owner.
 
 ## 12. The compact mental model
 
-DeepSpeed-Megatron MoE is a layered system:
+DeepSpeed-Megatron MoE is layered:
 
-Megatron initializes dense-model parallelism, builds transformer layers, DeepSpeed wraps MoE modules, MoE modules attach EP and expert-DP groups, forward uses gate -> dispatch -> experts -> combine, and backward synchronizes expert gradients with the right replicated peers.
-This explains why reading only one repository or one initialization function is misleading.
-The topology is split across the base training framework and the MoE module wrapper.
-Once that split is clear, the implementation becomes much less mysterious.
-The key question for every line of code is: is this about dense transformer ownership, expert ownership, token movement, or replicated-gradient synchronization?
+```text
+Megatron creates dense-model groups.
+Megatron builds transformer layers.
+DeepSpeed wraps the model.
+MoE modules attach EP and expert-DP groups.
+Forward routes tokens through gate -> dispatch -> experts -> combine.
+Backward synchronizes expert gradients with the right replicated peers.
+```
+
+When reading code, ask one question per tensor:
+
+```text
+Is this dense transformer ownership,
+expert ownership,
+token movement,
+or replicated-gradient synchronization?
+```
+
+That question cuts through most of the confusion.
+
+## Code
+
+- DeepSpeed public initialization entry point: [`deepspeed/__init__.py`](https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/__init__.py).
+- DeepSpeed engine created by `deepspeed.initialize()`: [`deepspeed/runtime/engine.py`](https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/engine.py).
+- DeepSpeed MoE layer wrapper: [`deepspeed/moe/layer.py`](https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/moe/layer.py).
+- DeepSpeed sharded MoE routing and dispatch: [`deepspeed/moe/sharded_moe.py`](https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/moe/sharded_moe.py).
+- DeepSpeed MoE package: [`deepspeed/moe/`](https://github.com/deepspeedai/DeepSpeed/tree/master/deepspeed/moe).
+- Megatron-DeepSpeed transformer model integration: [`megatron/model/transformer.py`](https://github.com/microsoft/Megatron-DeepSpeed/blob/main/megatron/model/transformer.py).
+- Megatron-DeepSpeed training loop context: [`megatron/training.py`](https://github.com/microsoft/Megatron-DeepSpeed/blob/main/megatron/training.py).
 
 ## References
 
 - Rajbhandari et al., [DeepSpeed-MoE: Advancing Mixture-of-Experts Inference and Training to Power Next-Generation AI Scale](https://arxiv.org/abs/2201.05596), ICML 2022.
 - Lepikhin et al., [GShard: Scaling Giant Models with Conditional Computation and Automatic Sharding](https://arxiv.org/abs/2006.16668), ICLR 2021.
 - Fedus, Zoph, Shazeer, [Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity](https://arxiv.org/abs/2101.03961), JMLR 2022.
+- Shazeer et al., [Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer](https://arxiv.org/abs/1701.06538), ICLR 2017.
 - Shoeybi et al., [Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism](https://arxiv.org/abs/1909.08053), 2019.
-- Microsoft, [DeepSpeed MoE documentation](https://www.deepspeed.ai/tutorials/mixture-of-experts/) and [DeepSpeed repository](https://github.com/microsoft/DeepSpeed).

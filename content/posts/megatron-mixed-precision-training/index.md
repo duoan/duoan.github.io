@@ -13,39 +13,40 @@ cover:
 
 # Megatron Internals III: Mixed Precision, Loss Scaling, and Grad Clipping
 
-Mixed precision training is sometimes described as "use fp16 for speed."
-That is incomplete.
-The working system is a contract between three copies of state: low-precision tensors for throughput, fp32 master tensors for stable updates, and distributed checks that prevent one bad rank from corrupting the step.
-Megatron's `Float16Optimizer` pattern is a good way to understand that contract.
+Mixed precision training is not just "turn on fp16." It is a state machine: fast low-precision tensors do forward and backward, stable fp32 tensors receive optimizer updates, and every rank agrees whether the step is valid before any shard changes.
+
+The classic recipe comes from Micikevicius et al., [Mixed Precision Training](https://arxiv.org/abs/1710.03740): use lower precision where hardware is fast, keep fp32 master weights for updates, and use loss scaling when fp16 gradients underflow.
+Megatron wraps that recipe around tensor, pipeline, and data parallelism.
 
 ## TL;DR
 
-- Mixed precision saves memory and uses Tensor Cores, but the optimizer still updates fp32 master parameters.
-- Static memory includes model parameters, gradients, master parameters, and optimizer moments; activation memory is separate and often larger for long sequences.
-- Loss scaling shifts small fp16 gradients into a representable range; dynamic loss scaling raises or lowers the scale based on overflow checks.
-- Overflow detection must be synchronized across data and model-parallel ranks before any rank updates.
-- Gradient clipping happens after unscale and fp32 gradient copy, and the norm must include all model-parallel shards.
-- This post follows [Part I](../megatron-distributed-init/) and [Part II](../megatron-model-parallel-internals/).
+- AMP chooses low-precision kernels for throughput, but the optimizer usually updates fp32 master parameters.
+- fp16 often needs loss scaling because small gradients underflow; bf16 usually does not because it has fp32-like exponent range.
+- Dynamic loss scaling is feedback control: increase scale after many clean steps, decrease and skip the step after overflow.
+- Overflow is a distributed decision. One bad rank means every rank in the logical update must skip.
+- Gradient clipping happens after unscale and fp32 gradient copy.
+- The norm must cover model-parallel shards; local shard norm is not the global model norm.
+- ZeRO changes where state lives, not the dtype invariants. For the optimizer-memory story, see [ZeRO Redundancy Optimizer](../zero-redundancy-optimizer/).
+- This post builds on the DP / TP / PP groups from [Part I](../megatron-distributed-init/) and the tensor-parallel layers from [Part II](../megatron-model-parallel-internals/).
 
 ## 1. The memory inventory
 
 A training step stores more than weights.
-For each parameter, Adam-style training may hold:
+For Adam-style training, each parameter can imply:
 
-- model parameters used by forward and backward;
-- gradients produced by backward;
-- fp32 master parameters used by the optimizer;
-- first and second moment estimates;
-- activation tensors needed for backward;
-- temporary buffers for communication and fused kernels.
+- model-precision parameter used by forward and backward;
+- model-precision gradient produced by backward;
+- fp32 master parameter used by the optimizer;
+- fp32 first moment;
+- fp32 second moment;
+- activation tensors saved for backward;
+- temporary buffers for collectives and fused kernels.
 
-The first four are model states.
-Activations and temporary buffers are residual states.
-ZeRO's original framing is still useful: optimizer states, gradients, and parameters are the static part; activations and buffers depend on batch shape, sequence length, recomputation, and parallel schedule.
+The first five are model states. Activations and temporary buffers are residual states. That distinction matters because different techniques attack different buckets: mixed precision reduces compute and some stored tensors, activation checkpointing reduces saved activations, and ZeRO partitions redundant optimizer, gradient, and parameter state across data-parallel ranks as described in [ZeRO](https://arxiv.org/abs/1910.02054).
 
 ![Mixed precision keeps fast tensors and stable tensors](precision_memory_table.svg)
 
-For a simple fp16 Adam setup, per parameter static storage can look like:
+For simple fp16 Adam, static storage can look like:
 
 ```text
 fp16 model param     2 bytes
@@ -57,72 +58,58 @@ fp32 Adam v          4 bytes
 total               16 bytes
 ```
 
-This is before activation memory.
-For long-context training, activations can dominate the same way MoE activations dominate production sparse runs; see the modern MoE performance post for a recent example of activation pressure in large systems: [Large MoE Performance](../large-moe-from-sparsity-to-communication/).
+That is before activations. Long sequence length, many microbatches in flight, or MoE routing buffers can dominate memory even when optimizer state is well managed. For a modern sparse-training example, see [Large MoE Performance](../large-moe-from-sparsity-to-communication/).
 
-## 2. Why keep fp32 master weights?
+## 2. Why fp32 master weights exist
 
-Low precision is fast because modern GPUs have high-throughput Tensor Cores for fp16, bf16, and newer formats.
-But optimizer updates are accumulation-heavy.
-Small updates can disappear if they are applied directly to fp16 parameters.
-The classic mixed precision recipe therefore keeps two parameter copies:
+Tensor Cores make fp16 and bf16 fast. Optimizer updates are different: they accumulate small changes over many steps. If you apply those updates directly to fp16 parameters, small deltas can round to zero.
+
+The standard contract is:
 
 ```text
-model_param: fp16 or bf16, participates in forward/backward
-main_param:  fp32, receives optimizer update
+model_param: fp16 or bf16, used by forward/backward
+main_param:  fp32, used by optimizer math
 ```
 
-At the start of an iteration, the model copy reflects the master copy.
-The forward and backward pass run mostly in model precision.
-Before the optimizer step, gradients are copied or accumulated into fp32 buffers, unscaled, checked, clipped, and applied to the master weights.
-The low-precision model weights are refreshed from the master weights.
+At the start of an iteration, the model-precision parameter reflects the master parameter.
+Forward and backward run mostly in model precision.
+Before the optimizer step, gradients are copied or accumulated into fp32 buffers, unscaled, checked, clipped, and applied to the fp32 master weights.
+Then master weights are copied back to model precision.
 
 ![AMP training flow with fp32 master weights](amp_flow.svg)
 
-This explains an otherwise surprising point: mixed precision reduces activation and compute precision, but it does not eliminate fp32 state.
-It moves fp32 to the places where it pays for stability.
+This is why mixed precision does not remove fp32 state. It moves fp32 to the update path, where stability matters most.
 
 ## 3. fp16 versus bf16
 
-fp16 and bf16 are both 16-bit formats.
-They fail differently.
-fp16 has more mantissa precision but a much narrower exponent range.
-bf16 keeps the fp32 exponent range and sacrifices mantissa bits.
-For training, exponent range is often more valuable than extra mantissa precision.
-That is why bf16 usually trains without loss scaling, while fp16 commonly needs it.
-The rest of this post uses fp16 as the harder case.
-The architecture still applies to bf16, but the dynamic scaling path is often disabled or less important.
+fp16 and bf16 are both 16-bit formats, but they fail differently:
+
+- fp16 has more mantissa precision but a narrow exponent range.
+- bf16 has fewer mantissa bits but keeps the fp32 exponent range.
+
+Training usually cares more about exponent range than extra mantissa bits. That is why fp16 commonly needs loss scaling and bf16 usually does not. The rest of this post uses fp16 as the hard case; the same optimizer-state machine still applies to bf16, but the dynamic loss-scaling branch is usually disabled or less active.
 
 ## 4. Loss scaling in one equation
 
-Backprop computes gradients proportional to the loss.
-If gradients are too small for fp16, they underflow to zero.
-Loss scaling multiplies the loss by a factor `S` before backward:
+Backprop computes gradients proportional to the loss. If gradients are too small for fp16, they underflow to zero. Loss scaling multiplies the loss by a scale `S` before backward:
 
 ```text
 scaled_loss = S * loss
 scaled_grad = S * grad
-grad = scaled_grad / S
+grad        = scaled_grad / S
 ```
 
-The math is unchanged if we divide by `S` before the optimizer update.
-The representation is changed during backward, where fp16 needs help.
-Static loss scaling chooses one fixed `S`.
-Dynamic loss scaling adapts `S` during training.
+The math is unchanged if gradients are divided by `S` before the optimizer update. The representation during backward is better. That is the whole trick.
+
+Static scaling uses one fixed `S`. Dynamic scaling adjusts `S` during training. PyTorch's [AMP documentation](https://pytorch.org/docs/stable/amp.html) exposes the same idea through autocast and `GradScaler`.
 
 ## 5. Dynamic loss scaling as feedback control
 
-Dynamic scaling has only two signals:
-
-- gradients were finite;
-- at least one gradient contained `inf` or `nan`.
-
-If all gradients are finite for many consecutive steps, increase the scale.
-If any gradient overflows, skip the update and decrease the scale.
+Dynamic loss scaling observes one signal: did any gradient overflow?
 
 ![Dynamic loss scaling is a feedback controller](dynamic_loss_scale.svg)
 
-A minimal controller:
+A minimal controller is:
 
 ```python
 if found_inf:
@@ -136,140 +123,145 @@ else:
         growth_tracker = 0
 ```
 
-The skipped step matters.
-Once an overflow happened, the gradients are not trustworthy.
-Applying them with a smaller scale after the fact would not recover the true values.
+The skipped step is essential. Once a gradient contains `inf` or `nan`, lowering the scale after the fact does not recover the true gradient. The only correct move is to discard that update and try the next iteration with a smaller scale.
 
-## 6. Distributed overflow is a global decision
+## 6. Overflow must be global
 
-In single-GPU AMP, overflow detection is local.
-In Megatron, no rank can update alone.
-Consider a tensor-parallel row-parallel layer.
-One rank may see a finite partial gradient while another rank overflows.
-If the finite rank updates its shard and the overflowed rank skips, the distributed parameter no longer represents one coherent model.
-Therefore overflow flags must be reduced across the relevant parallel groups.
-Conceptually:
+On one GPU, overflow detection is local. In Megatron, one logical model update spans many ranks.
+
+Consider a row-parallel layer. One TP rank can overflow while another rank sees finite partial gradients. If the finite rank updates and the overflowed rank skips, the sharded parameter no longer represents one coherent dense tensor.
+
+The invariant is:
 
 ```python
 found_inf_local = check_grads_for_inf_or_nan(local_grads)
-found_inf = all_reduce_max(found_inf_local, model_and_data_parallel_groups)
+found_inf = all_reduce_max(found_inf_local, relevant_parallel_groups)
 
 if found_inf:
     skip_step_on_every_rank()
 ```
 
-Different implementations choose different exact groups, but the invariant is simple: all ranks participating in one optimizer step must agree.
+The exact group set depends on the optimizer and parallel layout. The rule does not: all ranks participating in one logical update must make the same step-or-skip decision.
 
-## 7. The `Float16Optimizer` pattern
+## 7. The Megatron optimizer wrapper pattern
 
 Megatron-style mixed precision wraps a base optimizer.
-The wrapper owns the state transitions around it.
-At a high level:
+The wrapper owns dtype transitions and distributed checks.
 
 ```text
-Float16Optimizer
-  - keeps references to fp16/bf16 model params
-  - builds fp32 main params for optimizer updates
+Float16Optimizer-like wrapper
+  - tracks fp16/bf16 model parameters
+  - builds fp32 main parameters
   - copies model grads to main grads
-  - unscales gradients
+  - unscales by current loss scale
   - checks overflow
+  - computes global grad norm
   - clips gradients
-  - calls inner optimizer.step()
-  - copies main params back to model params
+  - calls the inner optimizer step
+  - copies fp32 main params back to model precision
 ```
 
-The inner optimizer can remain a familiar Adam variant.
-The wrapper is what makes the dtype and distributed invariants explicit.
-This separation is useful because tensor-parallel layers from [Part II](../megatron-model-parallel-internals/) only own shards.
-The optimizer wrapper does not need to understand the math of each layer.
-It only needs parameter lists grouped by dtype and parallel ownership.
+The inner optimizer can still be Adam or a fused Adam variant.
+The wrapper enforces the mixed-precision contract.
+
+This separation is useful with tensor parallelism.
+The optimizer does not need to know how `ColumnParallelLinear` computes its local shard.
+It needs to know which parameters and gradients are local, which ones are sharded, and which groups define global checks.
 
 ## 8. Copying gradients is not just casting
 
 Backward produces gradients attached to model-precision parameters.
-Before the optimizer step, those gradients are moved to fp32 master parameters.
-Three things can happen at once:
+Before the optimizer step, those gradients move into fp32 master-gradient buffers.
+Three operations often happen together:
 
 1. cast fp16 gradient to fp32;
 2. divide by the current loss scale;
-3. place the result in the master gradient buffer.
+3. place the result in the flattened master-gradient buffer.
 
-That buffer may be flattened for efficiency.
-It may also be sharded by ZeRO or distributed optimizer logic.
-The visible concept remains:
+Conceptually:
 
 ```python
 main_grad.copy_(model_grad.float())
 main_grad.mul_(1.0 / loss_scale)
 ```
 
-After this point, gradient clipping and optimizer math should see unscaled fp32 gradients.
+Real implementations fuse and flatten this path for bandwidth and launch overhead.
+The visible invariant is simpler:
+after this point, gradient clipping and optimizer math should see unscaled fp32 gradients.
 
 ## 9. Gradient clipping under model parallelism
 
-Clipping by global norm computes:
+Global-norm clipping computes:
 
 ```text
 global_norm = sqrt(sum_i ||grad_i||^2)
 clip_coef   = max_norm / (global_norm + eps)
 ```
 
-In a tensor-parallel model, each rank owns only some parameters.
+In tensor parallelism, one rank owns only part of the model.
 The local norm is incomplete.
-Megatron computes local squared norms, then reduces the sum across the model-parallel and data-parallel topology required by the optimizer.
-Only after the global norm is known can each rank scale its local gradients.
+Megatron computes local squared norms, reduces the sum over the needed model-parallel and data-parallel ownership, and then scales each local gradient by the same coefficient.
 
 ![Gradient clipping under model parallelism](grad_clip_with_mp.svg)
 
-The order is important:
+The order matters:
 
-1. detect overflow on scaled gradients;
-2. copy to fp32 main gradients;
+1. detect overflow;
+2. copy gradients to fp32 main buffers;
 3. unscale by loss scale;
-4. compute distributed norm;
-5. clip local fp32 gradients with global coefficient;
+4. compute distributed global norm;
+5. clip local gradients with the global coefficient;
 6. step fp32 master parameters;
 7. copy master parameters back to model precision.
 
-Clipping before unscale would make the threshold depend on the current loss scale.
-Clipping only local shards would make the threshold depend on TP size.
+Clipping before unscale makes the threshold depend on `loss_scale`.
+Clipping only local shards makes the threshold depend on TP size.
 Both are wrong.
 
-## 10. What happens with ZeRO
+## 10. How ZeRO changes the picture
 
-ZeRO changes where optimizer state lives.
-It does not remove the need for the dtype choreography.
-With ZeRO-1, optimizer states are partitioned across DP ranks.
-With ZeRO-2, gradients are partitioned too.
-With ZeRO-3, parameters are partitioned.
+ZeRO changes ownership.
+It does not change the numerical contract.
+
+- ZeRO-1 partitions optimizer states across DP ranks.
+- ZeRO-2 partitions optimizer states and gradients.
+- ZeRO-3 partitions optimizer states, gradients, and parameters.
+
 The mixed-precision wrapper still needs to know:
 
 - where the fp32 master shard lives;
-- where the model-precision shard lives during forward;
-- where unscaled gradients should be reduced or partitioned;
+- where the model-precision shard is available for forward;
+- where unscaled gradients should reduce, partition, or accumulate;
 - which ranks must agree on overflow and clipping.
 
-This is why initialization topology from [Part I](../megatron-distributed-init/) is a prerequisite for optimizer logic.
-The optimizer's memory savings are defined over DP-style redundancy, while TP and PP define model ownership.
+That is why process groups from [Megatron Internals I](../megatron-distributed-init/) are not startup trivia.
+They define the boundary of every later optimizer decision.
 
-## 11. Activation memory is a separate battle
+## 11. The compact mental model
 
-Mixed precision reduces activation bytes when activations are stored in fp16 or bf16.
-But activation memory can still dominate.
-The common tools are:
+Mixed precision is stable when the state machine is clear:
 
-- activation checkpointing, which recomputes forward pieces during backward;
-- selective recomputation, which targets cheap tensors;
-- sequence parallelism, which shards activations across TP ranks;
-- pipeline scheduling, which limits how many microbatch activations are resident.
+```text
+fast dtype computes
+fp32 dtype updates
+loss scale protects fp16 gradients
+overflow check gates the whole update
+global norm covers every model shard
+```
 
-Loss scaling and fp32 master weights do not solve activation pressure.
-They solve numerical stability and static-state update precision.
-Conflating these two memory problems leads to bad debugging.
 If a job OOMs before backward, loss scaling is not the lever.
-If gradients turn into zeros or `inf`, activation checkpointing is not the lever.
+If gradients become zero, `inf`, or `nan`, activation checkpointing is not the lever.
+Debug the state bucket that is actually failing.
+That habit saves more time than memorizing AMP flags.
 
-The design is simple when stated as an invariant: fast tensors compute; stable tensors update; all ranks agree before stepping.
+## Code
+
+- Megatron optimizer wrappers: [`megatron/core/optimizer/optimizer.py`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/optimizer/optimizer.py).
+- Megatron dynamic loss-scaling logic: [`megatron/core/optimizer/grad_scaler.py`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/optimizer/grad_scaler.py).
+- Megatron global-norm clipping helpers: [`megatron/core/optimizer/clip_grads.py`](https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/optimizer/clip_grads.py).
+- Megatron distributed optimizer implementations: [`megatron/core/optimizer/`](https://github.com/NVIDIA/Megatron-LM/tree/main/megatron/core/optimizer).
+- PyTorch AMP reference: [`torch.amp`](https://pytorch.org/docs/stable/amp.html).
+- DeepSpeed ZeRO implementation for sharded optimizer state: [`deepspeed/runtime/zero/`](https://github.com/deepspeedai/DeepSpeed/tree/master/deepspeed/runtime/zero).
 
 ## References
 
