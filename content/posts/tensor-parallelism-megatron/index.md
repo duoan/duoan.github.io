@@ -13,52 +13,53 @@ cover:
 
 # Tensor Parallelism in Megatron-LM: Splitting Layers, Not Stacks
 
-Pipeline parallelism splits a Transformer by depth: different GPUs own different layers. Tensor parallelism splits a Transformer inside each layer: different GPUs own different slices of the same matrix multiply, attention head set, or vocabulary table.
+Pipeline parallelism splits a model by depth. Tensor parallelism splits the math inside one layer.
 
-Megatron-LM made this practical for large Transformers by choosing splits that preserve local compute and place collectives at a small number of predictable points. The rule is simple: split where the math lets ranks work independently, then use all-reduce only when partial results must be combined.
+Megatron-LM made tensor parallelism practical for Transformers by choosing split points that preserve local GEMMs and put collectives only where the algebra requires them. The original Megatron paper introduced the core intra-layer pattern ([arXiv:1909.08053](https://arxiv.org/abs/1909.08053)). The later Megatron-LM systems paper showed how that TP axis composes with data and pipeline parallelism at cluster scale ([arXiv:2104.04473](https://arxiv.org/abs/2104.04473)).
+
+The rule is short: **split before independent work, reduce only when partial sums must become one tensor.**
 
 ## TL;DR
 
-- Tensor parallelism splits **layers**, not layer stacks. It is usually placed inside a node where NVLink/NVSwitch bandwidth is high.
-- For `Y = X A`, a column split of `A` produces output shards that can be concatenated. A row split of `A` produces partial sums that must be reduced.
-- Megatron's MLP uses column-parallel first projection, local GeLU, then row-parallel second projection. This avoids communicating before the nonlinearity.
-- Attention is naturally parallel over heads. Split Q, K, and V by head groups, compute attention locally, then reduce after the output projection.
-- Vocab-parallel embeddings shard the large token table. Vocab-parallel cross-entropy avoids gathering full logits when vocabulary size is large.
-- A common production layout is TP within a node and DP across nodes, often combined with ZeRO for optimizer-state memory.
+- Tensor parallelism partitions matrices, attention heads, embeddings, and logits inside each Transformer block.
+- TP communicates activation-sized tensors every layer, so it belongs on fast local links: NVLink or NVSwitch first.
+- A column split of `Y = X A` creates output feature shards and needs no forward reduction.
+- A row split creates partial sums and needs a reduction.
+- Megatron's MLP uses column-parallel first projection, local GeLU, then row-parallel second projection. That avoids communicating before the nonlinearity.
+- Attention splits heads. Each TP rank computes local heads, then the output projection reduces partial outputs.
+- Vocab-parallel embedding and cross-entropy avoid materializing full `[batch, seq, vocab]` tensors on every rank.
 - Reproducible figures for this post: [`playground/llm_training_series_figures.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/llm_training_series_figures.py).
 
 ## 1. Why Tensor Parallelism Exists
 
-Data parallelism scales throughput when a full model replica fits on each rank. ZeRO reduces redundant state, but each layer still has to execute. Pipeline parallelism splits layers across depth, but stage balance and bubbles become new problems.
+Data parallelism is ideal while a full replica fits. ZeRO reduces replicated state, but a rank may still need to execute very large layers. Pipeline parallelism splits the layer stack, but it introduces bubbles and stage balance.
 
-Tensor parallelism attacks a different limit: **one layer can be too large or too expensive for one GPU**.
+Tensor parallelism attacks a different limit: one Transformer block can be too wide or too expensive for one GPU.
 
-Large Transformers contain repeated dense operations:
+The repeated expensive operations are structured:
 
-- MLP projections from `h` to `4h` and back.
-- Q, K, V projections for attention.
-- Attention output projections.
-- Vocabulary embeddings and output logits.
+- MLP projections `h -> 4h` and `4h -> h`.
+- QKV projections.
+- Attention heads.
+- Attention output projection.
+- Token embeddings.
+- Output logits and cross-entropy.
 
-These are matrix operations with structure. If we split the matrices carefully, each GPU can perform a slice of the same layer, and the ranks communicate only at mathematically necessary boundaries.
-
-Megatron-LM's tensor parallelism is sometimes called intra-layer model parallelism. That name is accurate: it partitions the tensor algebra inside a Transformer block.
+These are not arbitrary tensors. Their algebra gives you natural split points. Megatron's contribution was to use those split points so each rank keeps large local GEMMs and communicates a small number of predictable activation tensors ([arXiv:1909.08053](https://arxiv.org/abs/1909.08053)).
 
 ## 2. Two Splits for `Y = X A`
 
-Let `X` have shape `[b, s, h]`, where:
-
-- `b` is local batch size.
-- `s` is sequence length.
-- `h` is hidden size.
-
-Let a linear layer weight `A` have shape `[h, h']`. The output is:
+Let:
 
 ```text
+X: [b, s, h]
+A: [h, h']
 Y = X A
 ```
 
-There are two basic ways to split `A`.
+where `b` is local batch, `s` is sequence length, and `h` is hidden size.
+
+There are two basic splits.
 
 ![Column and row splits have different communication needs](row_vs_column_split.svg)
 
@@ -72,7 +73,9 @@ Y_i = X A_i
 Y = [Y_1 | Y_2 | ... | Y_p]
 ```
 
-Each rank receives the same `X` and computes a shard of the output features. No reduction is needed to compute local `Y_i`. A later operation may need the shards concatenated, but the linear operation itself is embarrassingly parallel.
+Each rank receives the same `X` and produces a shard of output features. No reduction is needed for the linear operation. You may later gather or consume the shards locally.
+
+Megatron's `ColumnParallelLinear` is this primitive.
 
 ### Row split
 
@@ -84,52 +87,51 @@ A = [A_1; A_2; ...; A_p]
 Y = sum_i X_i A_i
 ```
 
-Each rank computes a partial output. The final result requires summing partials across ranks, usually with an all-reduce.
+Each rank computes a partial output. The final `Y` requires summing partials across TP ranks, usually by all-reduce or reduce-scatter/all-gather variants depending on sequence parallelism.
 
-Megatron builds Transformer tensor parallelism from these two primitives.
+Megatron's `RowParallelLinear` is this primitive.
+
+The entire Transformer TP pattern is built from these two cases.
 
 ## 3. The MLP Block
 
-A standard Transformer MLP is:
+A dense Transformer MLP is:
 
 ```text
 Z = GeLU(X A)
 Y = Z B
 ```
 
-where `A` maps `h -> 4h`, and `B` maps `4h -> h`.
+where `A` maps `h -> 4h` and `B` maps `4h -> h`.
 
 Megatron chooses:
 
-- `A` is **column-parallel**.
-- GeLU is computed locally on each output shard.
-- `B` is **row-parallel**.
-- The row-parallel output is all-reduced.
+1. `A` is column-parallel.
+2. GeLU runs locally on each rank's output shard.
+3. `B` is row-parallel.
+4. The row-parallel output is reduced.
 
 ![Megatron MLP uses column-parallel GeLU then row-parallel output](mlp_tp.svg)
 
-This choice avoids a communication point before GeLU. That matters because GeLU is nonlinear:
+The nonlinear point is the reason:
 
 ```text
 GeLU(a + b) != GeLU(a) + GeLU(b)
 ```
 
-If the first projection were row-parallel, ranks would produce partial sums and need an all-reduce before GeLU. By making it column-parallel, each rank owns complete output channels for its shard and can apply GeLU independently.
+If the first projection were row-parallel, ranks would create partial sums and need an all-reduce before GeLU. That would put a collective between the first GEMM and the nonlinearity. By making the first projection column-parallel, each rank owns complete intermediate channels for its shard and can apply GeLU locally.
 
-The second projection then consumes sharded `4h` features and produces partial `h` outputs. Those partials are summed by an all-reduce. In Megatron notation, the pair of communication operators is often described as:
+The second projection consumes sharded intermediate channels. Its output is a sum across rank-local partial results, so one reduction is mathematically necessary.
 
-- `f`: identity in forward, all-reduce in backward.
-- `g`: all-reduce in forward, identity in backward.
+The original Megatron paper describes the communication operators as `f` and `g`: identity in one pass, all-reduce in the other, placed around the two parallel linear layers ([arXiv:1909.08053](https://arxiv.org/abs/1909.08053)). The implementation can evolve, but the invariant remains: do not communicate before the local nonlinearity; reduce when partial linear outputs must be summed.
 
-The exact autograd implementation can vary, but the invariant is stable: one collective at the MLP output in forward, and the corresponding collective on the gradient path.
+## 4. Attention: Split Heads
 
-## 4. Attention: Split the Heads
-
-Multi-head attention already decomposes hidden channels into heads. That makes it a natural fit for tensor parallelism.
+Multi-head attention is already partitioned into heads, so TP has a natural axis.
 
 ![Attention splits QKV and attention heads across tensor-parallel ranks](attention_tp.svg)
 
-For `H` attention heads and tensor parallel size `p`, assign roughly `H/p` heads to each rank. Each rank holds the Q, K, and V projection shards for its heads:
+For `H` heads and TP size `p`, each rank owns roughly `H/p` heads. It holds Q, K, and V projection shards for those heads:
 
 ```text
 Q_i = X W^Q_i
@@ -137,144 +139,132 @@ K_i = X W^K_i
 V_i = X W^V_i
 ```
 
-Then each rank computes attention for its local heads:
+Then it computes local attention:
 
 ```text
 O_i = softmax(Q_i K_i^T / sqrt(d_head)) V_i
 ```
 
-No rank needs another rank's heads to compute its own attention outputs. After the heads are produced, the output projection is row-parallel, just like the second MLP projection. Partial outputs are summed.
+No rank needs another rank's heads for this local attention computation. After local heads are produced, the output projection is row-parallel and reduces partial hidden outputs.
 
-This is why tensor-parallel configurations often require the number of attention heads to be divisible by TP size. Some systems support uneven or grouped layouts, but clean divisibility reduces edge cases and load imbalance.
+This is why clean TP configurations want:
 
-## 5. Communication Per Transformer Block
+- Number of attention heads divisible by TP size.
+- Hidden size divisible by TP size.
+- MLP intermediate size divisible by TP size.
 
-The simplified Megatron block has two major all-reduce points in forward:
+Systems can handle edge cases, but divisibility avoids load imbalance, padding, and special kernels.
 
-1. MLP output after the row-parallel projection.
-2. Attention output after the row-parallel projection.
+## 5. Communication per Transformer Block
 
-Backward has the matching reductions for input gradients. If the communicated activation tensor has size:
+In the simple Megatron block, forward has two major activation reductions:
+
+1. Attention output projection.
+2. MLP output projection.
+
+Backward has corresponding reductions on the gradient path. If the activation tensor size is:
 
 ```text
 Phi_TP = b * s * h
 ```
 
-then the communication volume per block is often summarized as proportional to several all-reduces over `Phi_TP`.
+then TP communication is proportional to several collectives over `Phi_TP` per block.
 
-This explains a critical placement rule: tensor parallelism wants fast local links. TP communication happens every layer and moves activation-sized tensors. Put TP ranks on GPUs connected by NVLink or NVSwitch when possible. Use data parallelism across slower cross-node links, where communication is gradient-sized and happens once per step or per bucket.
+This explains TP placement. TP is not a once-per-step gradient synchronization. It is every layer, with activation-sized payloads. Put TP ranks on the fastest links available. In practice, that means TP inside a node or NVSwitch island, then DP/ZeRO across slower network links.
+
+The Megatron-LM systems paper reports high aggregate scaling by composing TP with pipeline and data parallelism rather than stretching one TP group across the whole cluster ([arXiv:2104.04473](https://arxiv.org/abs/2104.04473)).
 
 ## 6. Vocab-Parallel Embedding
 
-The token embedding table has shape `[vocab, h]`. For large vocabularies, it can be a significant memory block. Megatron shards it across the vocabulary dimension.
+The embedding table has shape `[vocab, h]`. Large vocabularies make it a substantial tensor. Megatron shards it by vocabulary range.
 
 ![Vocab-parallel embedding shards token ranges and reduces sparse results](embedding_vocab_parallel.svg)
 
-Each TP rank owns a range of token IDs:
+Each rank owns token IDs in one range:
 
 ```text
-rank 0: tokens [0, v/p)
-rank 1: tokens [v/p, 2v/p)
+rank 0: [0, v/p)
+rank 1: [v/p, 2v/p)
 ...
 ```
 
-During embedding lookup:
+For lookup:
 
-1. Each rank checks which input token IDs fall into its vocabulary range.
-2. It returns embeddings for tokens it owns and zeros for tokens it does not own.
-3. Ranks all-reduce the embedding outputs.
+1. Each rank masks input token IDs outside its range.
+2. It returns embeddings for tokens it owns and zeros elsewhere.
+3. Ranks reduce the embedding outputs.
 
-Because each token belongs to exactly one shard, summing the local results reconstructs the full embedding output.
+Because each token belongs to exactly one shard, the sum reconstructs the full embedding.
 
-The output embedding or language-model head is often tied to the input embedding. Weight tying across pipeline stages or tensor-parallel groups requires care: gradients from input and output uses must be accumulated into the same sharded parameter.
+This same vocabulary partition matters at the output head. If embeddings are tied, input and output uses must accumulate gradients into the same sharded parameter. Pipeline boundaries and tensor-parallel groups make that bookkeeping easy to get wrong.
 
 ## 7. Vocab-Parallel Cross-Entropy
 
-The naive way to compute language-model loss is:
+The naive loss all-gathers `[b, s, vocab/p]` logits into `[b, s, vocab]` on every rank before softmax. That is a bad trade when `vocab` is large.
 
-1. Gather all vocab-sharded logits into a full `[b, s, vocab]` tensor.
-2. Apply softmax.
-3. Compute cross-entropy against target tokens.
+Vocab-parallel cross-entropy keeps logits sharded. Each rank computes local max and denominator contributions; reductions over `[b, s]` values form the global softmax normalizer. The target logit comes from the rank that owns the target token and is reduced as a small tensor.
 
-That all-gather is expensive because `vocab` is large.
+The communication moves from `O(b * s * vocab)` toward `O(b * s)` plus small target-logit exchanges. This is the Megatron pattern again: do not gather a large tensor when a few reductions reconstruct the quantity the math needs.
 
-Vocab-parallel cross-entropy avoids materializing full logits. Each rank computes local logits for its vocabulary shard. The softmax denominator can be formed with reductions over per-token local sums. The target logit is selected from the rank that owns the target token, then reduced or broadcast as a small tensor.
+## 8. TP + DP + PP: The Practical Layout
 
-The communication changes from something proportional to:
-
-```text
-b * s * vocab
-```
-
-to reductions closer to:
-
-```text
-b * s
-```
-
-plus small scalar or vector exchanges. For large vocabularies, this is the difference between a practical output layer and a communication wall.
-
-## 8. TP + DP Hybrid Layout
-
-Megatron's classic large-model recipe combines tensor parallelism and data parallelism.
+Megatron's production recipe is hybrid parallelism.
 
 ![Tensor parallelism is usually intra-node; data parallelism spans replicas](tp_dp_hybrid.svg)
 
-A common placement is:
+A common dense layout:
 
-- TP group inside a node, using fast GPU-to-GPU links.
-- DP group across nodes, using network links for gradient synchronization.
-- ZeRO or distributed optimizer across DP ranks to reduce optimizer-state memory.
+- TP group inside a fast-link domain.
+- Pipeline parallelism across layer stages when depth or global scale needs it.
+- Data parallelism across replicas.
+- ZeRO or a distributed optimizer across the DP dimension to reduce optimizer-state memory.
 
-This placement follows the communication pattern:
+The reason is communication locality:
 
-- TP communicates activation tensors every layer, so it wants the fastest links.
-- DP communicates gradient buckets during backward, so it can tolerate larger, less frequent cross-node collectives.
-- Pipeline parallelism, when used, adds another process-group dimension across layer stages.
+- TP communicates activations every layer.
+- PP communicates activations across stage boundaries.
+- DP communicates gradients once per backward bucket.
+- ZeRO communicates model-state shards around optimizer or module boundaries.
 
-The result is often called 3D parallelism: data, tensor, and pipeline. Modern training stacks add sequence/context parallelism and expert parallelism for long-context and MoE models, but TP remains the core intra-layer primitive.
+Use fast links for the frequent activation collectives. Use the network for less frequent gradient/model-state collectives when possible.
 
-## 9. Experimental Lessons from Megatron-LM
+## 9. Where TP Fails
 
-The Megatron-LM paper, *Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism* (Shoeybi et al., 2019), showed that carefully chosen tensor parallelism can scale Transformer training to multi-billion-parameter models with high hardware utilization.
+More TP ranks do not automatically make training faster. The common failures are small GEMMs, activation collectives that dominate every layer, heads or hidden dimensions that do not divide cleanly, TP groups that cross slow links, sequence lengths that make `b * s * h` huge, and fused kernels that no longer see the shape they were built for.
 
-The important experimental lessons are durable:
+Debug the boundaries first:
 
-- Splitting by Transformer structure is better than generic matrix sharding. MLP and attention have different natural split points.
-- Communication must be placed around large GEMMs, not between tiny operations.
-- TP size is limited by communication and head divisibility. Larger TP is not automatically better.
-- Combining TP with DP gives a better scaling surface than using either alone.
-- Kernel efficiency matters. If tensor shards become too small, GEMMs lose efficiency and communication dominates.
+- Column-parallel layers should not gather too early.
+- Row-parallel layers should reduce exactly once.
+- Vocab-parallel targets must be masked and reduced correctly.
+- Tied embeddings need gradients from every use before the optimizer step.
+- Local GEMM shapes must remain Tensor-Core-friendly.
 
-These lessons still apply even though modern models are larger, GPUs are faster, and Megatron-Core has evolved far beyond the original code.
+The right TP size is usually the smallest size that makes layers fit and keeps local GEMMs efficient. After that, scale with DP, ZeRO, PP, sequence/context parallelism, or expert parallelism depending on the actual blocker.
 
-## 10. Debugging Tensor Parallel Training
+## 10. Code
 
-Tensor-parallel bugs are often shape or group bugs. A short checklist:
+Megatron's names are the right anchors:
 
-- Verify hidden size, number of heads, and MLP intermediate size are divisible by TP size.
-- Confirm TP process groups are local to the intended fast-link domain.
-- Check that row-parallel layers reduce outputs exactly once.
-- Check that column-parallel layers do not accidentally gather too early.
-- Validate vocab-parallel target handling for tokens on every shard.
-- Ensure tied embeddings receive gradients from all uses before the optimizer step.
-- Profile all-reduce overlap and GEMM sizes; small shards can look correct but run slowly.
+- [NVIDIA Megatron-LM](https://github.com/NVIDIA/Megatron-LM): tensor, pipeline, data, sequence, and expert parallel training.
+- [Megatron-Core tensor parallel package](https://github.com/NVIDIA/Megatron-LM/tree/main/megatron/core/tensor_parallel): current home for tensor-parallel layers and mappings.
+- Conceptual paths to look for: `ColumnParallelLinear`, `RowParallelLinear`, `VocabParallelEmbedding`, and vocab-parallel cross entropy.
+- [Megatron-LM legacy model layers](https://github.com/NVIDIA/Megatron-LM/tree/main/megatron/legacy/model): older lineage closer to the original paper.
+- [PyTorch c10d](https://github.com/pytorch/pytorch/tree/main/torch/csrc/distributed/c10d): process-group and collective substrate.
 
-Correct tensor parallelism is not just "split the matrix." It is split, compute locally, communicate at the mathematical boundary, and keep that boundary aligned with hardware.
+Track whether each layer returns a sharded tensor or a gathered tensor. Most TP bugs are wrong assumptions about that boundary.
 
-## 11. The Core Pattern
-
-Megatron-LM tensor parallelism can be reduced to one pattern:
+## 11. Minimal Pattern
 
 ```text
-Choose a split that preserves local nonlinear work.
-Delay communication until partial linear results must be combined.
-Place the TP group on the fastest links available.
+Column split before local nonlinear work.
+Row split when partial sums must be reduced.
+Split heads for attention.
+Shard vocab; reduce only what the loss needs.
+Keep TP on fast local links.
 ```
 
-For the MLP, that means column split before GeLU and row split after. For attention, it means split heads. For embeddings and loss, it means shard the vocabulary and reduce only the small quantities needed to reconstruct the result.
-
-The reward is a Transformer block that can be wider than one GPU while still looking like one layer to the rest of the training stack.
+That pattern gives a Transformer block wider than one GPU while still presenting one layer abstraction to the rest of the training stack.
 
 ## References
 
@@ -282,3 +272,4 @@ The reward is a Transformer block that can be wider than one GPU while still loo
 - Deepak Narayanan et al., [*Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM*](https://arxiv.org/abs/2104.04473), SC 2021.
 - Ashish Vaswani et al., [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762), NeurIPS 2017.
 - Samyam Rajbhandari et al., [*ZeRO: Memory Optimizations Toward Training Trillion Parameter Models*](https://arxiv.org/abs/1910.02054), SC 2020.
+- Code: [NVIDIA Megatron-LM](https://github.com/NVIDIA/Megatron-LM), [Megatron-Core tensor parallel](https://github.com/NVIDIA/Megatron-LM/tree/main/megatron/core/tensor_parallel), [Megatron legacy model layers](https://github.com/NVIDIA/Megatron-LM/tree/main/megatron/legacy/model), [PyTorch c10d](https://github.com/pytorch/pytorch/tree/main/torch/csrc/distributed/c10d).

@@ -13,72 +13,74 @@ cover:
 
 # ZeRO: Partitioning Optimizer State, Gradients, and Parameters
 
-Plain data parallelism is communication-efficient enough to be useful, but memory-wasteful enough to break at large model sizes. Every rank stores the same parameters, gradients, and optimizer state. For Adam, the optimizer state alone can be several times larger than the model weights used in forward.
+Plain DDP is clean but wasteful. Every data-parallel rank stores the same parameters, gradients, fp32 master weights, and optimizer moments. At small scale that redundancy is convenient. At LLM scale it is the memory wall.
 
-ZeRO, short for Zero Redundancy Optimizer, keeps the data-parallel training semantics but partitions redundant state across ranks. The idea is direct: if every rank does not need every byte at the same time, stop storing every byte everywhere.
+ZeRO, the Zero Redundancy Optimizer, keeps data-parallel semantics and removes the redundant storage one category at a time. ZeRO-1 shards optimizer state. ZeRO-2 shards optimizer state and gradients. ZeRO-3 shards optimizer state, gradients, and parameters ([arXiv:1910.02054](https://arxiv.org/abs/1910.02054)).
+
+The mechanism is not mystical. If a rank does not need a byte right now, do not store that byte there. Gather it just in time, reduce it to the owner, then release it.
 
 ## TL;DR
 
-- Training memory splits into **model states** (parameters, gradients, optimizer state) and **residual states** (activations, temporary buffers, fragmentation).
-- Mixed precision does not remove fp32 state. With Adam plus fp16/bf16 compute, static model-state memory is roughly `16 * Psi` bytes for `Psi` parameters before activations.
-- ZeRO-1 partitions optimizer state. ZeRO-2 partitions optimizer state and gradients. ZeRO-3 partitions optimizer state, gradients, and parameters.
-- ZeRO has model-parallel shape but data-parallel semantics: each rank processes different data, and parameters are gathered only when needed.
-- Communication cost rises because shards must be reduced, gathered, or prefetched. The trade is often favorable because memory is the hard limit.
-- ZeRO-R extends the idea to residual states: partitioned activation checkpointing, constant-size buffers, and memory defragmentation.
-- ZeRO-Offload and ZeRO-Infinity add CPU DRAM and NVMe to the memory hierarchy, relying on overlap and prefetching to keep GPUs busy.
+- Training memory splits into **model states** and **residual states**. ZeRO first attacks model-state redundancy.
+- Mixed precision Adam commonly needs about `16 * Psi` bytes of static model state for `Psi` parameters before activations.
+- ZeRO-1 partitions optimizer state. ZeRO-2 also partitions gradients. ZeRO-3 also partitions parameters.
+- ZeRO has model-sharded storage but data-parallel semantics: each rank still trains on different data.
+- The cost is communication and runtime discipline: bucket, prefetch, release, and overlap.
+- ZeRO-Offload moves optimizer state and compute to CPU DRAM ([arXiv:2101.06840](https://arxiv.org/abs/2101.06840)). ZeRO-Infinity extends the hierarchy to NVMe with prefetch and tiling ([arXiv:2104.07857](https://arxiv.org/abs/2104.07857)).
+- PyTorch FSDP is the same broad family: shard parameters and gather them around module execution.
 - Reproducible figures for this post: [`playground/llm_training_series_figures.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/llm_training_series_figures.py).
 
-## 1. Memory Taxonomy
+## 1. Name the Memory
 
-Before optimizing memory, name what is consuming it.
+Before optimizing memory, split it into the right buckets.
 
 ![Training memory includes model states and residual states](memory_breakdown.svg)
 
-**Model states** are tied directly to the parameters:
+**Model states** scale directly with parameter count:
 
 - Parameters used by forward and backward.
 - Gradients produced by backward.
-- Optimizer state such as Adam's first and second moments.
-- Often fp32 master parameters for mixed precision.
+- Optimizer state, such as Adam's first and second moments.
+- fp32 master parameters in many mixed precision optimizers.
 
-**Residual states** are produced by the training process:
+**Residual states** come from execution:
 
 - Activations needed for backward.
 - Temporary communication buffers.
-- Workspaces used by kernels and libraries.
-- Fragmented memory that is technically free but not usable as one contiguous block.
+- Kernel workspaces.
+- Fragmentation inside the allocator.
 
-ZeRO first targets model states because they scale directly with parameter count and are heavily redundant in data parallelism. Activation techniques matter too, but the cleanest first win is to stop replicating Adam state everywhere.
+The original ZeRO paper makes this distinction explicit because the remedies differ ([arXiv:1910.02054](https://arxiv.org/abs/1910.02054)). Sharding optimizer state does not remove activation memory. Activation checkpointing does not remove Adam moments. You need to know which wall you are hitting.
 
-## 2. Mixed Precision Memory Math
+## 2. The 16 Bytes per Parameter Problem
 
-Let `Psi` be the number of parameters. In mixed precision training with Adam, a common memory layout is:
-
-- fp16/bf16 parameters for forward/backward: `2 * Psi` bytes.
-- fp16/bf16 gradients: `2 * Psi` bytes.
-- fp32 master parameters: `4 * Psi` bytes.
-- Adam first moment: `4 * Psi` bytes.
-- Adam second moment: `4 * Psi` bytes.
-
-That totals:
+Let `Psi` be parameter count. A common mixed precision Adam layout is:
 
 ```text
-2 Psi + 2 Psi + 4 Psi + 4 Psi + 4 Psi = 16 Psi bytes
+fp16/bf16 parameters: 2 * Psi bytes
+fp16/bf16 gradients:  2 * Psi bytes
+fp32 master weights:  4 * Psi bytes
+Adam first moment:    4 * Psi bytes
+Adam second moment:   4 * Psi bytes
+```
+
+Total:
+
+```text
+16 * Psi bytes
 ```
 
 ![Mixed precision still stores fp32 master weights and Adam moments](mixed_precision_memory.svg)
 
-This estimate excludes activations. It also excludes temporary buffers and fragmentation. For a 10B parameter model, `16 * Psi` is about 160 GB of model-state memory. Plain DDP puts that on every data-parallel rank.
+For a 10B parameter model, that is about 160 GB of model-state memory before activations. Plain DDP puts those 160 GB on every data-parallel rank.
 
-The exact number varies with optimizer and implementation. SGD has less state. Adafactor can reduce state. bf16 may avoid loss scaling complexity. But the shape remains: optimizer state dominates, and ordinary data parallelism duplicates it.
+The exact budget changes with optimizer and dtype. SGD stores less. Adafactor changes the moment structure. Some bf16 stacks avoid fp32 master weights. The shape remains: optimizer state is large, and data parallelism replicates it.
 
 ## 3. The ZeRO Principle
 
-The key observation is that not every model state is needed everywhere at every moment.
+Data parallelism requires every rank to contribute gradients for its data shard and apply the same logical update. It does **not** require every rank to permanently store every optimizer byte.
 
-During forward for a layer, a rank needs that layer's parameters. It does not need all optimizer moments. During gradient reduction, a rank needs to contribute gradients, but it does not need to keep the complete reduced gradient forever. During the optimizer step, a rank only needs the optimizer state for the parameters it updates.
-
-ZeRO partitions state across the data-parallel group:
+ZeRO assigns ownership over shards:
 
 ```text
 rank 0 owns shard 0
@@ -87,137 +89,169 @@ rank 1 owns shard 1
 rank N-1 owns shard N-1
 ```
 
-When a full tensor is needed, ranks communicate. When it is no longer needed, non-owned pieces can be released. ZeRO trades bandwidth and scheduling complexity for memory capacity.
+When a full tensor is needed, ranks communicate. When a rank only needs its owned shard, it keeps only that shard.
 
 ![ZeRO stages progressively remove redundancy](zero_stages.svg)
 
-## 4. ZeRO-1: Partition Optimizer State
+That is the entire trade: lower HBM footprint in exchange for more collective communication and stricter tensor lifetimes.
 
-ZeRO-1 partitions optimizer state across data-parallel ranks. Each rank still keeps:
+## 4. ZeRO-1: Shard Optimizer State
+
+ZeRO-1 partitions optimizer state across data-parallel ranks ([arXiv:1910.02054](https://arxiv.org/abs/1910.02054)).
+
+Each rank keeps:
 
 - Full fp16/bf16 parameters.
-- Full gradients, or at least full gradient buckets during reduction.
-- Only `1/N` of optimizer state.
+- Full gradients, or full gradient buckets during reduction.
+- Only `1/N` of optimizer state and owned master weights, depending on implementation.
 
-After backward, gradients are reduced. Each rank updates the parameter shard for which it owns optimizer state. Updated parameter shards are then gathered so every rank once again has a full parameter replica for the next forward pass.
+After backward, gradients are reduced. Each rank updates the parameter shard it owns. Updated parameter shards are then gathered so every rank has full parameters for the next forward pass.
 
-The memory reduction can be large because Adam state is large. In the 16 bytes-per-parameter estimate, optimizer-related fp32 state accounts for 12 bytes if master weights are grouped with optimizer state. Partitioning that over `N` ranks changes the largest block from replicated to sharded.
+Why this is a large first win: in the 16-byte estimate, fp32 master weights plus Adam moments are 12 bytes per parameter. Sharding that across `N` ranks removes the largest replicated block.
 
-Communication can be described in two ways:
+Communication is still close to familiar data parallelism. Practical implementations use reduce-scatter and all-gather patterns rather than literally materializing every full tensor in every phase.
 
-- In the conceptual ZeRO paper accounting, ZeRO-1 may be shown with a full gradient all-reduce plus parameter all-gather.
-- In practical implementations, a reduce-scatter of gradients followed by an all-gather of updated parameters can avoid materializing unnecessary full gradients.
+Use ZeRO-1 when the model almost fits and optimizer state is the main problem.
 
-The important point is the trade: ZeRO-1 is a memory win with modest communication changes, and it preserves familiar data-parallel execution.
+## 5. ZeRO-2: Shard Gradients Too
 
-## 5. ZeRO-2: Partition Gradients Too
+ZeRO-2 partitions optimizer state and gradients ([arXiv:1910.02054](https://arxiv.org/abs/1910.02054)).
 
-ZeRO-2 partitions optimizer state and gradients. Each rank still has full parameters during forward/backward, but after backward it keeps only the reduced gradient shard it owns.
-
-The gradient communication naturally becomes reduce-scatter:
+Parameters remain fully resident during forward and backward. Gradients do not. After backward, the gradient reduction naturally becomes reduce-scatter:
 
 ```text
 local gradients on all ranks
     -> reduce-scatter
-reduced gradient shard per rank
-    -> local optimizer update for owned shard
+reduced gradient shard on owning rank
+    -> local optimizer update
     -> all-gather updated parameter shards
 ```
 
-This removes another large replicated tensor. For Adam mixed precision, ZeRO-2 often brings model-state memory down enough to train models that plain DDP cannot fit, while keeping communication close to the baseline all-reduce volume.
+This removes another replicated tensor. For dense training, ZeRO-2 is often a strong default because it gives a large memory drop while keeping parameter access simple during forward/backward.
 
-Why close to baseline? A ring all-reduce is reduce-scatter plus all-gather. ZeRO-2 uses reduce-scatter for gradients and all-gather for updated parameters. The shape is familiar; the placement of materialized tensors changes.
+The communication shape should look familiar from [ring all-reduce](../data-parallelism-ddp-ring-allreduce/): all-reduce is reduce-scatter plus all-gather. ZeRO-2 changes which pieces stay materialized and where the optimizer runs.
 
-## 6. ZeRO-3: Partition Parameters
+Use ZeRO-2 when gradients are a meaningful memory consumer and you do not need to shard parameters during compute.
 
-ZeRO-3 partitions optimizer state, gradients, and parameters. No rank permanently stores a full parameter replica.
+## 6. ZeRO-3: Shard Parameters
 
-During execution:
+ZeRO-3 partitions optimizer state, gradients, and parameters ([arXiv:1910.02054](https://arxiv.org/abs/1910.02054)).
 
-1. Before a layer's forward, ranks all-gather that layer's parameter shards.
-2. The layer computes using the full parameter for that layer.
-3. Non-owned parameter shards can be released after use.
-4. Backward gathers parameters again as needed.
-5. Gradients are reduce-scattered to owning ranks.
-6. Each rank updates only its own parameter shard.
+No rank permanently stores a full model replica. Execution becomes:
 
-This is the most aggressive memory reduction. It is also the most communication-sensitive. A naive ZeRO-3 implementation can drown in small gathers. A good implementation prefetches upcoming parameters, overlaps communication with compute, and uses bucketed transfers.
+1. Before a module runs, all-gather the needed parameter shards.
+2. Run forward or backward with the full parameter for that module.
+3. Release non-owned parameter shards as soon as their lifetime ends.
+4. Reduce-scatter gradients back to owning ranks.
+5. Update only local owned shards.
 
-ZeRO-3 is especially powerful because it breaks the "full model replica per data-parallel rank" assumption. But it does not turn the computation into tensor parallelism. Each rank still processes a different data shard and computes the same layer once the needed parameters are gathered.
+This is the stage that breaks the "one full replica per DP rank" memory assumption.
 
-## 7. ZeRO vs Model Parallelism
+It is also the stage most sensitive to implementation quality. Naive ZeRO-3 can turn a training step into a long chain of blocking all-gathers. Good ZeRO-3 depends on:
 
-The distinction matters for mental models and performance debugging.
+- Large buckets, not tiny per-parameter collectives.
+- Prefetch of upcoming module parameters.
+- Immediate release after use.
+- Overlap with compute where dependencies allow it.
+- Topology-aware groups.
+- Checkpoint formats that understand sharded state.
+
+ZeRO-3 is powerful when full parameters cannot remain resident. It is overkill when ZeRO-2 already fits and the job is bandwidth-bound.
+
+## 7. ZeRO Is Not Tensor Parallelism
+
+This distinction prevents many debugging mistakes.
 
 ![ZeRO and model parallelism split different responsibilities](zero_vs_model_parallel.svg)
 
-In tensor or model parallelism, ranks split the layer computation itself. A rank owns a slice of a matrix multiply, attention head, or layer stack. The input activations are routed through a distributed computation graph.
+In tensor parallelism, ranks split the layer computation. One rank owns columns, another owns rows, or heads are split across ranks. Activations flow through a distributed computation graph.
 
-In ZeRO-3, ranks split persistent storage. When a layer executes, the needed full parameter is reconstructed, used, and then discarded. The data-parallel contract remains: each rank has different examples and contributes gradients to a shared update.
+In ZeRO-3, ranks split persistent storage. When a module executes, the needed full parameter is reconstructed for that module. Each rank still processes a different data shard.
 
-This is why ZeRO combines naturally with tensor parallelism. Tensor parallelism reduces per-rank compute and parameter size within a layer; ZeRO reduces redundant model-state storage across data-parallel replicas.
+That is why ZeRO composes naturally with [Megatron tensor parallelism](../tensor-parallelism-megatron/). TP reduces per-rank layer compute and parameter slices inside a TP group. ZeRO reduces redundant model-state storage across data-parallel replicas.
 
-## 8. Communication Costs and Overlap
+## 8. Residual States: ZeRO-R
 
-ZeRO's communication cost depends on stage and implementation:
+The original ZeRO work also discusses residual-state optimizations under ZeRO-R ([arXiv:1910.02054](https://arxiv.org/abs/1910.02054)).
 
-- ZeRO-1 communicates gradients and updated parameter shards.
-- ZeRO-2 uses gradient reduce-scatter and parameter all-gather.
-- ZeRO-3 adds parameter all-gathers around forward and backward.
+**Partitioned activation checkpointing** shards activation checkpoints across model-parallel ranks and gathers them for recomputation. This matters when long sequence length makes activations rival model states.
 
-The raw byte count is only part of the story. Performance depends on whether communication is overlapped with useful compute.
+**Constant-size buffers** keep communication temporary memory predictable. As rank count grows, shards get small; collecting them into stable buffers avoids a mess of tiny messages and allocator churn.
 
-Good ZeRO implementations rely on:
+**Memory defragmentation** addresses allocator reality. A job can have enough total free memory but fail to allocate one contiguous block. Reusing and compacting buffers reduces that failure mode.
 
-- **Bucketing**: group many small tensors into large transfers.
-- **Prefetching**: gather parameters for upcoming layers before they are needed.
-- **Release discipline**: free non-owned shards as soon as their lifetime ends.
-- **Topology-aware process groups**: avoid slow links where possible.
-- **Gradient accumulation**: amortize synchronization over multiple micro-steps when memory allows.
+These are less famous than ZeRO-1/2/3, but they decide whether large jobs run for days without allocator surprises.
 
-When overlap works, the visible cost of extra communication is much smaller than the byte count suggests. When overlap fails, ZeRO-3 can look like a sequence of tiny blocking all-gathers.
+## 9. Offload: CPU DRAM Is a Slower Memory Tier
 
-## 9. ZeRO-R: Residual State Optimizations
-
-The original ZeRO work also discusses residual states under the ZeRO-R umbrella.
-
-**Partitioned activation checkpointing** shards activation checkpoints across model-parallel ranks and gathers them when needed for recomputation. This is useful when activation memory rivals or exceeds parameter memory, especially for long sequences.
-
-**Constant-size buffers** control temporary communication memory. As the number of ranks grows, individual shards get smaller. Tiny messages waste bandwidth, so implementations accumulate data into buffers of predictable size before communicating.
-
-**Memory defragmentation** addresses allocator reality. A job can fail allocation even when total free memory looks sufficient, because the requested block needs contiguous space. Defragmentation and careful buffer reuse reduce this failure mode.
-
-These techniques are less famous than ZeRO-1/2/3, but they matter in large jobs. Once model states are sharded, activations and buffers often become the next bottleneck.
-
-## 10. Offload and Infinity
-
-ZeRO-Offload and ZeRO-Infinity extend the same principle beyond GPU HBM.
+ZeRO-Offload moves optimizer state and optimizer computation to CPU for some configurations ([arXiv:2101.06840](https://arxiv.org/abs/2101.06840)).
 
 ![ZeRO-Offload and Infinity stage model states through CPU and NVMe](zero_offload.svg)
 
-The memory hierarchy becomes:
+The hierarchy becomes:
 
 ```text
-GPU HBM  -> fastest, smallest, used for compute-critical tensors
-CPU DRAM -> larger, slower, useful for optimizer state and staging
-NVMe     -> much larger, much slower, useful with prefetch and streaming
+GPU HBM  -> fastest, smallest
+CPU DRAM -> larger, slower, connected by PCIe/NVLink-C2C depending on system
+NVMe     -> much larger, much slower
 ```
 
-ZeRO-Offload moves optimizer computation and state to CPU for some configurations. ZeRO-Infinity generalizes offload with a runtime that can stage parameter, gradient, and optimizer shards across GPU, CPU, and NVMe.
+Offload helps only if GPU compute can overlap with host transfers and CPU optimizer work. If the GPU waits on PCIe every layer, the memory win becomes a throughput loss.
 
-The engineering challenge is overlap. If a GPU waits on PCIe or NVMe for every layer, the memory win is not useful. The runtime must prefetch enough data ahead, evict cold shards, and keep transfers large. Offload is not a magic capacity button; it is a scheduling system.
+The practical use case is capacity-constrained training where peak throughput is not the only target: fine-tuning, smaller clusters, or runs where HBM is the hard blocker and CPU memory is available.
 
-## 11. Practical Guidance
+## 10. Infinity: NVMe Joins the Schedule
 
-Use the lowest ZeRO stage that solves the memory problem:
+ZeRO-Infinity generalizes offload by staging parameters, gradients, and optimizer states across GPU, CPU, and NVMe ([arXiv:2104.07857](https://arxiv.org/abs/2104.07857)).
 
-- Start with DDP or ZeRO-1 if the model mostly fits and optimizer state is the issue.
-- Use ZeRO-2 when gradients are a major memory consumer and you want a strong default for dense training.
-- Use ZeRO-3 when full parameters cannot remain resident or when model scale forces it.
-- Add activation checkpointing independently; ZeRO does not remove activation memory by itself.
-- Consider offload when HBM is the blocker and the throughput target can tolerate careful staging.
+NVMe is not "more GPU memory." It is a storage tier that must be streamed. The runtime needs:
 
-The failure mode is choosing the most aggressive stage by default. ZeRO-3 can unlock capacity, but it also adds more places for communication, prefetching, and checkpointing to go wrong. The best system is the simplest one that fits and keeps GPUs busy.
+- Tiling so working sets fit in HBM.
+- Prefetch far enough ahead to hide NVMe and CPU latency.
+- Eviction of cold shards.
+- Large sequential transfers instead of random small reads.
+- Overlap between compute, CPU memory movement, and NVMe IO.
+
+Infinity is a scheduling system around a memory hierarchy. Treat it as such. The failure mode is enabling offload and discovering that the GPU is now a very expensive device waiting on storage.
+
+## 11. FSDP as the Same Family
+
+PyTorch Fully Sharded Data Parallel (FSDP) lives in the same design family as ZeRO-3: shard parameters across data-parallel ranks, all-gather before module execution, reduce-scatter gradients, and free full parameters after use.
+
+The API and implementation details differ from DeepSpeed ZeRO, but the mental model transfers:
+
+- Parameter shards are persistent.
+- Full parameters are temporary.
+- Bucket size, prefetch, wrapping policy, and overlap decide performance.
+- Checkpointing must understand sharded state.
+
+Use this framing when comparing DeepSpeed ZeRO and PyTorch FSDP. The important question is not the brand. It is tensor lifetime and communication placement.
+
+## 12. Code
+
+Read these code paths for the actual contracts:
+
+- [DeepSpeed ZeRO runtime](https://github.com/deepspeedai/DeepSpeed/tree/master/deepspeed/runtime/zero): partitioning, parameter coordination, offload, gradient reduction, and optimizer state management.
+- [DeepSpeed ZeRO stage 3](https://github.com/deepspeedai/DeepSpeed/blob/master/deepspeed/runtime/zero/stage3.py): all-gather/release behavior and stage-3 orchestration.
+- [DeepSpeed ZeRO-Offload](https://github.com/deepspeedai/DeepSpeed/tree/master/deepspeed/runtime/zero): CPU optimizer/offload paths live under the same runtime tree.
+- [PyTorch FSDP](https://github.com/pytorch/pytorch/tree/main/torch/distributed/fsdp): related sharded data-parallel implementation.
+- [Megatron-LM distributed optimizer](https://github.com/NVIDIA/Megatron-LM): production distributed optimizer patterns that compose with TP/PP.
+
+The useful exercise is to trace a parameter through forward prefetch, use, release, backward gather, gradient reduce-scatter, and optimizer update.
+
+## 13. Practical Guidance
+
+Use the lowest stage that solves the memory problem:
+
+1. **Plain DDP**: when a full replica fits and communication is acceptable.
+2. **ZeRO-1**: optimizer state is the blocker.
+3. **ZeRO-2**: gradients are also a major memory block.
+4. **ZeRO-3 / FSDP**: parameters cannot stay fully resident.
+5. **Offload / Infinity**: HBM is still the blocker and the throughput target can tolerate careful staging.
+
+Add activation checkpointing independently. ZeRO reduces model-state memory; it does not make long-context activations disappear.
+
+The most common mistake is enabling the most aggressive stage first. ZeRO-3 can unlock scale, but it also adds more collectives, more scheduling state, and more checkpoint complexity. The best configuration is the simplest one that fits and keeps GPUs busy.
 
 ## References
 
@@ -225,3 +259,5 @@ The failure mode is choosing the most aggressive stage by default. ZeRO-3 can un
 - Jie Ren et al., [*ZeRO-Offload: Democratizing Billion-Scale Model Training*](https://arxiv.org/abs/2101.06840), USENIX ATC 2021.
 - Samyam Rajbhandari et al., [*ZeRO-Infinity: Breaking the GPU Memory Wall for Extreme Scale Deep Learning*](https://arxiv.org/abs/2104.07857), SC 2021.
 - Yanping Huang et al., [*GPipe: Efficient Training of Giant Neural Networks using Pipeline Parallelism*](https://arxiv.org/abs/1811.06965), NeurIPS 2019.
+- Mohammad Shoeybi et al., [*Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism*](https://arxiv.org/abs/1909.08053), 2019.
+- Code: [DeepSpeed](https://github.com/deepspeedai/DeepSpeed), [`deepspeed/runtime/zero/`](https://github.com/deepspeedai/DeepSpeed/tree/master/deepspeed/runtime/zero), [PyTorch FSDP](https://github.com/pytorch/pytorch/tree/main/torch/distributed/fsdp), [NVIDIA Megatron-LM](https://github.com/NVIDIA/Megatron-LM).

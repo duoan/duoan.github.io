@@ -13,187 +13,203 @@ cover:
 
 # Pipeline Parallelism from First Principles: Why GPipe Split the Batch
 
-Pipeline parallelism starts from a simple observation: a Transformer stack is already a chain. If one device cannot hold the whole chain, put consecutive layers on different devices and pass activations forward. That solves the first problem, but it creates two new ones: most devices wait, and activations still dominate memory.
+Pipeline parallelism starts with a useful accident: a Transformer is already a chain. If one GPU cannot hold the whole stack, put consecutive blocks on consecutive GPUs and send activations across stage boundaries.
 
-GPipe made the idea usable by splitting the batch into micro-batches and checkpointing activations. The result is not the final word in pipeline training, but it is the cleanest entry point for understanding why pipeline schedules exist at all.
+That solves capacity. It does not solve throughput. A naive layer split turns an expensive cluster into a queue where most devices wait. GPipe's contribution was to make the queue busy by slicing the mini-batch into micro-batches and recomputing activations instead of storing everything ([arXiv:1811.06965](https://arxiv.org/abs/1811.06965)).
+
+Modern pipeline systems add 1F1B schedules, interleaving, PipeDream-style asynchrony, and zero-bubble tricks. Those are refinements. The core mechanism is still the GPipe triangle: **bubble, activation memory, and stage balance**.
 
 ## TL;DR
 
-- Distributed training has two first-order goals: **fit larger models** and **finish training faster**. Memory capacity and interconnect bandwidth decide how close we get.
-- Naive layer-wise model parallelism fits more layers, but its bubble fraction is `(K - 1) / K` for `K` pipeline stages. As `K` grows, the cluster spends most of its time waiting.
-- Splitting a mini-batch into `M` micro-batches reduces the GPipe bubble fraction to `(K - 1) / (K + M - 1)`. A practical starting point is `M >= 4K`, then tune for memory and kernel efficiency.
-- Activation memory without checkpointing scales like `O(N * (L/K) * d)` per stage. With rematerialization, peak activation memory becomes roughly `O(N + (N/M) * (L/K) * d)`.
-- GPipe showed close-to-linear model-size scaling on Transformer models because they split evenly; AmoebaNet scaled less cleanly because stage balance was harder.
-- Modern stacks often prefer 1F1B, interleaved schedules, and zero-bubble variants, but they inherit the same core trade: bubble, memory, and communication.
+- Pipeline parallelism partitions the **layer stack**. It is different from tensor parallelism, which partitions the math inside a layer.
+- Naive layer-wise model parallelism fits more layers but has bubble fraction `(K - 1) / K` for `K` stages. At `K = 8`, 87.5% of device-time is idle.
+- GPipe splits one mini-batch into `M` micro-batches. Its flush schedule reduces the bubble to `(K - 1) / (K + M - 1)` ([arXiv:1811.06965](https://arxiv.org/abs/1811.06965)).
+- Rematerialization stores stage-boundary activations and recomputes local activations during backward. It trades FLOPs for HBM.
+- 1F1B schedules reduce activation residency. PipeDream trades clean synchronous semantics for weight staleness ([arXiv:1806.03377](https://arxiv.org/abs/1806.03377)). Zero-bubble schedules try to fill idle slots with weight-gradient work.
+- The production question is not "GPipe or not." It is: how deep can the pipe be before bubbles, imbalance, and activation traffic eat the win?
 - Reproducible figures for this post: [`playground/llm_training_series_figures.py`](https://github.com/duoan/duoan.github.io/blob/main/playground/llm_training_series_figures.py).
 
-## 1. The Optimization Target
+## 1. What Pipeline Parallelism Partitions
 
-Adding GPUs only helps if it changes one of two constraints:
+Let a model have `L` layers and `K` pipeline stages. A balanced partition gives each stage about `L/K` layers:
 
-1. **Capacity**: the model, optimizer state, gradients, activations, and temporary buffers fit somewhere.
-2. **Throughput**: the added devices do enough useful work to reduce wall-clock time.
+```text
+stage 0: layers [0, L/K)
+stage 1: layers [L/K, 2L/K)
+...
+stage K-1: final layers
+```
 
-The ideal scaling story says: double the GPUs, double the trainable model size, and double the token throughput. Real systems lose that ideal to two taxes:
+Forward sends activations from stage `i` to stage `i + 1`. Backward sends activation gradients in reverse. Parameters stay on the stage that owns the layer.
 
-- **Memory pressure**. A bigger model means more parameters and more optimizer state. A larger batch or longer sequence means more activations. The backward pass needs intermediate values from the forward pass unless we recompute them.
-- **Communication pressure**. Every stage boundary, gradient synchronization, and parameter exchange moves bytes over links that are slower than local HBM.
+That is the capacity win. Each GPU stores only its local layers, local optimizer state, local gradients, and the activations it needs for its stage. If a model fails because the full stack does not fit, pipeline parallelism is the natural partition.
 
-Pipeline parallelism attacks capacity first. It divides the layer stack into `K` partitions and places each partition on a different device. If the partitioning is balanced, each GPU holds roughly `L/K` layers for a model with `L` layers.
+The cost is that a chain has dependencies. Stage `3` cannot run micro-batch `j` until stage `2` has produced its activation. The schedule decides whether those dependencies leave GPUs idle.
 
-The technique becomes interesting only after we ask the throughput question.
+## 2. Naive Layer Splitting Fits, Then Waits
 
-## 2. Naive Model Parallelism: It Fits, Then Waits
-
-The most direct strategy is to assign consecutive layers to consecutive GPUs:
+The direct schedule sends one mini-batch through all stages, then sends its backward pass back.
 
 ![Naive layer-wise model parallelism has long idle bubbles](naive_model_parallel.svg)
 
-For one mini-batch, the forward pass moves from stage `0` to stage `K - 1`. Then the backward pass moves in reverse. During most of that timeline, only one stage is active. The other stages are idle.
-
-Assume each stage spends `t_f + t_b` on its portion of the work for a mini-batch. In a naive schedule:
+Only one stage works at the beginning of forward. The pipe fills slowly. Then only one stage works at the end of backward. For one mini-batch, assume every stage has equal time `t_f + t_b`.
 
 ```text
-useful work area = K * (t_f + t_b)
-timeline area    = K * K * (t_f + t_b)
-bubble fraction  = (K - 1) / K
+useful device-time = K * (t_f + t_b)
+total timeline     = K * K * (t_f + t_b)
+bubble fraction    = (K - 1) / K
 ```
 
-That expression is brutal. At `K = 2`, half the device-time is idle. At `K = 8`, the idle fraction is 87.5%. Increasing the number of stages makes the model fit, but it also makes the schedule worse.
+The math is not subtle:
 
-Naive model parallelism also does not automatically solve activation memory. If the local partition has `L/K` layers, hidden width `d`, and mini-batch size `N`, the stored activations per stage scale as:
+- `K = 2`: 50.0% idle.
+- `K = 4`: 75.0% idle.
+- `K = 8`: 87.5% idle.
+
+This is why "just split layers across GPUs" disappoints. Capacity improves while utilization collapses.
+
+Naive splitting also leaves activation memory unsolved. For local batch `N`, hidden width `d`, and local depth `L/K`, stored activations scale roughly as:
 
 ```text
 O(N * (L/K) * d)
 ```
 
-This is smaller than keeping all `L` layers on one GPU, but it may still be too large. Worse, teams often increase batch size when they add GPUs, which pushes `N` back up.
+That is smaller than the full stack, but it is still proportional to local depth and batch. Increasing global batch to use more GPUs can push the memory problem right back onto each stage.
 
-## 3. GPipe's Key Move: Split the Mini-Batch
+## 3. GPipe's Move: Micro-Batch the Mini-Batch
 
-GPipe's central idea is to keep the same model partitioning, but feed the pipeline with multiple micro-batches from one mini-batch.
+GPipe keeps synchronous mini-batch semantics but feeds the pipeline with `M` micro-batches.
 
 ![Micro-batches fill the pipeline and amortize fixed bubbles](gpipe_microbatch.svg)
 
-Let:
+Definitions:
 
-- `K` be the number of pipeline stages.
-- `M` be the number of micro-batches.
-- `N` be the original mini-batch size.
+- `K`: pipeline stages.
+- `M`: micro-batches inside one mini-batch.
+- `N`: original mini-batch size.
+- `N/M`: per-micro-batch size.
 
-Each micro-batch has size `N/M`. Stage `0` starts micro-batch `0`, then immediately starts micro-batch `1` while stage `1` works on micro-batch `0`. Once the pipe is full, all stages are busy. There is still a ramp-up bubble and a ramp-down bubble, but those fixed bubbles are amortized over more work.
+Stage `0` starts micro-batch `0`, then starts micro-batch `1` while stage `1` processes micro-batch `0`. Once the pipe is warm, all stages work on different micro-batches from the same mini-batch.
 
-For the GPipe flush schedule, the bubble fraction becomes:
+For GPipe's synchronous flush schedule, the bubble fraction becomes:
 
 ```text
 (K - 1) / (K + M - 1)
 ```
 
-This is the whole reason micro-batches matter. For `K = 8`:
+For `K = 8`:
 
-- `M = 1` gives `7/8 = 87.5%` bubble.
-- `M = 8` gives `7/15 = 46.7%` bubble.
-- `M = 32` gives `7/39 = 17.9%` bubble.
-
-The GPipe paper recommends making `M` at least several times larger than `K`; `M >= 4K` is a useful first setting. After that, more micro-batches have diminishing returns and can make each micro-batch too small to use matrix-multiply kernels efficiently.
+- `M = 1`: `7/8 = 87.5%`.
+- `M = 8`: `7/15 = 46.7%`.
+- `M = 32`: `7/39 = 17.9%`.
 
 ![Bubble fraction drops as M grows](bubble_vs_m.svg)
 
-The phrase "pipeline parallelism" is literal here: micro-batches are the items moving through the production line.
+The direction is clear: more micro-batches amortize the fixed fill/drain bubble. The limit is also clear: micro-batches eventually become too small. GEMMs shrink, kernel launch overhead matters, normalization/statistics edge cases appear, and activation bookkeeping grows.
 
-## 4. Synchronous Updates and the Flush Schedule
+The GPipe paper reports near-linear model-size scaling on Transformer workloads because the stack is regular and partitions cleanly ([arXiv:1811.06965](https://arxiv.org/abs/1811.06965)). That result is not a magic property of pipelines. It is a property of balanced stages with enough micro-batches.
 
-GPipe accumulates gradients across the `M` micro-batches and applies one update for the original mini-batch. That makes it a **synchronous** pipeline method. Every stage uses the same parameter version for the mini-batch, and the optimizer step happens after all micro-batches finish backward.
+## 4. Synchronous Flush Semantics
 
-The benefit is simple semantics:
+GPipe accumulates gradients over the `M` micro-batches and applies one optimizer step for the original mini-batch.
 
-- The training result matches ordinary mini-batch SGD, aside from numerical-order differences.
-- There is no weight staleness within the mini-batch.
-- Gradient accumulation is easy to reason about.
+The benefit is clean:
 
-The cost is the flush bubble. The pipeline must drain before the update. Later systems explore alternatives:
+- Every micro-batch in the mini-batch sees the same parameter version.
+- The update matches ordinary synchronous mini-batch training, aside from numerical ordering.
+- Optimizer, checkpoint, and loss-scaling semantics remain easy to reason about.
 
-- **1F1B** schedules perform one forward and one backward per stage once warm, reducing activation residency compared with GPipe's all-forward-then-all-backward pattern.
-- **Interleaved pipeline parallelism** splits each device into multiple virtual stages, improving load balance and reducing bubbles when communication permits.
-- **Zero-bubble schedules** try to overlap weight-gradient computation with otherwise idle slots.
+The cost is the flush. GPipe runs all forwards, then all backwards, then updates. The pipeline must drain before the next mini-batch can use updated weights.
 
-Those methods are important in production, but GPipe is still the best first model because the math is visible.
+That cost explains later schedules:
 
-## 5. Activation Checkpointing: Pay FLOPs to Buy Memory
+- **1F1B**: once warm, each stage alternates one forward and one backward. This reduces activation residency because backward starts before all forwards finish. Megatron-LM's pipeline implementation relies on this family of schedules at scale ([arXiv:2104.04473](https://arxiv.org/abs/2104.04473)).
+- **PipeDream**: allows asynchronous pipeline execution and manages multiple weight versions, trading higher utilization for weight staleness and more complex semantics ([arXiv:1806.03377](https://arxiv.org/abs/1806.03377)).
+- **Interleaved 1F1B**: splits one physical device into multiple virtual pipeline stages to reduce bubble and improve balance when communication allows it ([arXiv:2104.04473](https://arxiv.org/abs/2104.04473)).
+- **Zero-bubble schedules**: split backward into input-gradient and weight-gradient work so otherwise idle slots can compute weight gradients. The point is not zero cost; the point is moving useful work into bubble time.
 
-Micro-batches reduce idle time. GPipe's second move, rematerialization, reduces activation memory.
+GPipe remains the best first model because it makes the dependency graph visible.
+
+## 5. Activation Checkpointing: Trade FLOPs for HBM
+
+Micro-batches reduce idle time. Rematerialization reduces activation memory.
 
 ![Rematerialization keeps checkpoints and recomputes local activations during backward](rematerialization.svg)
 
-During backward, a layer needs forward activations. The naive strategy stores every intermediate activation. GPipe instead keeps only the partition boundary inputs and recomputes internal activations when backward reaches that partition.
+Backward needs forward activations. The naive plan stores every intermediate tensor produced by every local layer for every micro-batch. GPipe keeps only the stage-boundary inputs and recomputes internal activations when backward reaches that stage ([arXiv:1811.06965](https://arxiv.org/abs/1811.06965)).
 
-For each stage, the memory picture changes:
+Per stage, the lifetime changes:
 
-- Keep the input activation for each micro-batch at the partition boundary.
-- During one micro-batch's backward, recompute the local forward activations for that stage.
-- Release recomputed activations after their gradients are computed.
+1. Store the partition input for each micro-batch.
+2. During backward for one micro-batch, rerun local forward through the stage.
+3. Use the recomputed activations to compute gradients.
+4. Release them immediately.
 
-The approximate peak per-stage activation memory becomes:
+The rough activation peak becomes:
 
 ```text
 O(N + (N/M) * (L/K) * d)
 ```
 
-The first term is the boundary checkpoint across the mini-batch. The second term is the temporary activation footprint for one micro-batch through the local `L/K` layers.
+The first term is the boundary checkpoint across the mini-batch. The second is the temporary footprint for one micro-batch through the local layers.
 
-This is a trade, not free lunch. Backward now includes extra forward compute. In GPipe's experiments, rematerialization is often a large part of the non-matrix-multiply time. The trade is still attractive because it converts a hard memory limit into a softer throughput cost.
+This is not free. Backward includes extra forward compute. The trade is usually sane because HBM is a hard cliff and extra FLOPs are schedulable. Modern memory-efficient pipeline systems keep pushing this idea: choose what to store, what to recompute, and what to overlap ([arXiv:2006.09503](https://arxiv.org/abs/2006.09503)).
 
-## 6. Batch Normalization Is a Historical Footnote for LLMs
+## 6. Stage Balance Is the Real Clock
 
-GPipe was evaluated on image models and language models, so the original paper had to discuss BatchNorm. Splitting a mini-batch changes the statistics seen by each micro-batch. GPipe handled this by using micro-batch statistics during training while tracking moving averages at the mini-batch level for evaluation.
+Pipeline throughput is set by the slowest stage, not the average stage.
 
-For modern Transformer LLM training, this is usually not the central issue. LayerNorm and RMSNorm normalize per token or per hidden vector and do not depend on cross-example batch statistics. The practical knobs are micro-batch size, activation checkpointing granularity, sequence length, and schedule.
+Transformers make this easier than many older networks because blocks are repeated and shapes are regular. Still, the ends of the model are not always identical:
 
-## 7. What GPipe Proved Experimentally
+- Embedding and LM-head stages can be heavy when vocabulary is large.
+- Attention and MLP costs change with sequence length, hidden size, and tensor-parallel layout.
+- Activation checkpointing and recompute may not be evenly distributed.
+- Cross-stage activation sizes can differ if the architecture changes width.
 
-The GPipe paper, *Efficient Training of Giant Neural Networks using Pipeline Parallelism* (Huang et al., 2019), evaluated both AmoebaNet and Transformer models.
+GPipe's Transformer results scale better than its AmoebaNet results for exactly this reason: regular stacks partition cleanly; irregular graphs do not ([arXiv:1811.06965](https://arxiv.org/abs/1811.06965)).
 
-The important lesson is not a single throughput number. It is that **partitionability controls scaling**.
+Before choosing `K`, measure or estimate per-layer compute and activation size. A clever schedule cannot save a partition where one stage is 1.6x slower than the others.
 
-For Transformer models, increasing pipeline stages allowed the authors to scale model size almost linearly. The stack is regular: each block is similar, activation shapes are predictable, and partition boundaries can be chosen evenly.
+## 7. Where Pipeline Fits in a Modern LLM Stack
 
-For AmoebaNet, scaling was less clean. The network structure is less uniform, so one stage can become the memory or compute bottleneck. Pipeline throughput is controlled by the slowest stage, not by the average stage.
+Pipeline parallelism is rarely the first axis for decoder-only LLMs. A common order is:
 
-The training-speed results tell the same story:
+1. Use data parallelism while one replica fits.
+2. Add ZeRO/FSDP when replicated model states are the blocker.
+3. Add tensor parallelism when individual layers need faster local links or cannot fit.
+4. Add sequence/context parallelism when long context dominates activations or attention.
+5. Add pipeline parallelism when depth still does not fit or global scale needs another axis.
 
-- With too few micro-batches, bubble dominates and scaling is poor.
-- With enough micro-batches, Transformer throughput improves close to linearly over the tested range.
-- Communication matters, but the schedule can still help even when fast links are disabled, because the baseline bubble is so large.
+The order changes when the model is extremely deep or the cluster topology forces it. But pipeline always charges the same costs: micro-batches, bubbles, stage balance, activation transfers, and checkpoint complexity.
 
-The lesson for LLM systems is direct: before choosing `K`, estimate per-layer memory and compute. A perfectly elegant pipeline schedule cannot save a bad partition.
+Pipeline is strongest when:
 
-## 8. How to Choose Pipeline Parallelism Today
+- Layers are regular and easy to partition.
+- Stage-boundary tensors are modest compared with local compute.
+- The global batch supports enough micro-batches.
+- The training stack can handle pipeline-aware checkpointing, logging, and fault recovery.
 
-Pipeline parallelism is usually not the first tool to reach for in decoder-only LLM training. A common order is:
+Pipeline is weakest when:
 
-1. Use data parallelism for throughput.
-2. Use tensor parallelism when single-layer matrices are too large or when intra-node bandwidth is abundant.
-3. Use ZeRO/FSDP to shard model states across data-parallel ranks.
-4. Add sequence/context parallelism for long contexts.
-5. Add pipeline parallelism when the layer stack still cannot fit or when global scale requires another dimension.
+- The global batch is small.
+- Sequence length makes boundary activations huge.
+- Stages are irregular.
+- Per-stage compute is too small to hide activation sends.
 
-Pipeline parallelism is strongest when:
+## 8. Code
 
-- The model has many similar layers.
-- Stage boundaries move modest activation tensors.
-- The batch can be split into enough micro-batches.
-- The team can tolerate schedule complexity in checkpointing, logging, and failure recovery.
+Useful code paths to read:
 
-It is weakest when:
+- [Megatron-LM](https://github.com/NVIDIA/Megatron-LM): production 1F1B, interleaved pipeline schedules, virtual pipeline stages, and pipeline process groups.
+- [PyTorch pipelining](https://github.com/pytorch/pytorch/tree/main/torch/distributed/pipelining): current PyTorch pipeline frontend and schedule implementations.
+- [DeepSpeed pipeline engine](https://github.com/deepspeedai/DeepSpeed/tree/master/deepspeed/runtime/pipe): pipeline modules, schedules, and activation checkpoint integration.
+- [torchgpipe](https://github.com/kakaobrain/torchgpipe): GPipe-style micro-batch scheduling lineage in PyTorch.
 
-- Layers are irregular and hard to balance.
-- The global batch is small, limiting `M`.
-- Sequence length is so large that activation traffic dominates stage-boundary communication.
-- The pipeline depth is high but per-stage compute is small.
+Read code for tensor lifetimes, not just APIs. The important details are where activations are stored, when sends/recvs are launched, and how micro-batch dependencies are represented.
 
-## 9. A Minimal Mental Model
+## 9. Minimal Mental Model
 
-When evaluating a pipeline plan, keep four numbers on the whiteboard:
+Keep four numbers visible:
 
 ```text
 K = pipeline stages
@@ -202,16 +218,18 @@ bubble ~= (K - 1) / (K + M - 1)
 activation peak ~= O(N + (N/M) * (L/K) * d)
 ```
 
-Then add the two constraints that do not fit neatly into the formula:
+Then add the two terms the formula hides:
 
-- **Balance**: the slowest stage sets the pipeline clock.
+- **Balance**: the slowest stage sets the clock.
 - **Communication**: stage-boundary activation transfers must fit under useful compute.
 
-GPipe's contribution was to make those tradeoffs operational. Split the layer stack to fit. Split the batch to fill the stack. Recompute activations to keep memory below the cliff. The modern pipeline literature keeps improving the schedule, but this first-principles shape remains the same.
+GPipe made the trade operational: split the stack to fit, split the batch to fill the stack, and recompute activations to stay under the memory cliff. Everything after GPipe is a better schedule for the same dependency graph.
 
 ## References
 
 - Yanping Huang et al., [*GPipe: Efficient Training of Giant Neural Networks using Pipeline Parallelism*](https://arxiv.org/abs/1811.06965), NeurIPS 2019.
 - Aaron Harlap et al., [*PipeDream: Fast and Efficient Pipeline Parallel DNN Training*](https://arxiv.org/abs/1806.03377), SOSP 2019.
 - Deepak Narayanan et al., [*Memory-Efficient Pipeline-Parallel DNN Training*](https://arxiv.org/abs/2006.09503), ICML 2021.
+- Deepak Narayanan et al., [*Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM*](https://arxiv.org/abs/2104.04473), SC 2021.
 - Zhiquan Li et al., [*Chimera: Efficiently Training Large-Scale Neural Networks with Bidirectional Pipelines*](https://arxiv.org/abs/2107.06925), SC 2021.
+- Code: [NVIDIA Megatron-LM](https://github.com/NVIDIA/Megatron-LM), [PyTorch pipelining](https://github.com/pytorch/pytorch/tree/main/torch/distributed/pipelining), [DeepSpeed pipeline runtime](https://github.com/deepspeedai/DeepSpeed/tree/master/deepspeed/runtime/pipe), [torchgpipe](https://github.com/kakaobrain/torchgpipe).
