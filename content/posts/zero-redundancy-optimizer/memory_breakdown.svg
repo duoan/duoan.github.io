@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="648pt" height="345.6pt" viewBox="0 0 648 345.6" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-08-03T00:47:15.252689</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 345.6 
+L 648 345.6 
+L 648 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 60.432 200.78087 
+L 143.664 200.78087 
+L 143.664 140.958261 
+L 60.432 140.958261 
+z
+" clip-path="url(#p48a06e3446)" style="fill: #e8eef7; stroke: #4c72b0; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 143.664 200.78087 
+L 226.896 200.78087 
+L 226.896 140.958261 
+L 143.664 140.958261 
+z
+" clip-path="url(#p48a06e3446)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 226.896 200.78087 
+L 351.744 200.78087 
+L 351.744 140.958261 
+L 226.896 140.958261 
+z
+" clip-path="url(#p48a06e3446)" style="fill: #faefe6; stroke: #dd8452; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 351.744 200.78087 
+L 455.784 200.78087 
+L 455.784 140.958261 
+L 351.744 140.958261 
+z
+" clip-path="url(#p48a06e3446)" style="fill: #efecf5; stroke: #8172b3; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 455.784 200.78087 
+L 566.76 200.78087 
+L 566.76 140.958261 
+L 455.784 140.958261 
+z
+" clip-path="url(#p48a06e3446)" style="fill: #eef1f4; stroke: #64748b; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_1">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="102.048" y="173.353003" transform="rotate(-0 102.048 173.353003)">params</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="185.28" y="173.353003" transform="rotate(-0 185.28 173.353003)">grads</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif" transform="translate(268.081406 168.313987)">optimizer</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif" transform="translate(275.576719 178.392018)">states</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="403.764" y="173.353003" transform="rotate(-0 403.764 173.353003)">activations</text>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif" transform="translate(490.230984 168.313987)">buffers +</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif" transform="translate(488.111062 178.392018)">fragments</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #64748b" x="324" y="260.603478" transform="rotate(-0 324 260.603478)">ZeRO targets model states first, then residual states.</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 13.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="324" y="21.96" transform="rotate(-0 324 21.96)">Training memory is not just model weights</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p48a06e3446">
+   <rect x="11.88" y="27.96" width="624.24" height="305.76"/>
+  </clipPath>
+ </defs>
+</svg>

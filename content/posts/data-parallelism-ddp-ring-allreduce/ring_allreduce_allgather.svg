@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="648pt" height="360pt" viewBox="0 0 648 360" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-08-03T00:47:15.191327</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 360 
+L 648 360 
+L 648 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 122.1624 127.84992 
+L 179.0376 127.84992 
+Q 182.5056 127.84992 182.5056 124.64832 
+L 182.5056 97.75488 
+Q 182.5056 94.55328 179.0376 94.55328 
+L 122.1624 94.55328 
+Q 118.6944 94.55328 118.6944 97.75488 
+L 118.6944 124.64832 
+Q 118.6944 127.84992 122.1624 127.84992 
+z
+" clip-path="url(#p18b3bb4e47)" style="fill: #e8eef7; stroke: #1f2933; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 455.0904 127.84992 
+L 511.9656 127.84992 
+Q 515.4336 127.84992 515.4336 124.64832 
+L 515.4336 97.75488 
+Q 515.4336 94.55328 511.9656 94.55328 
+L 455.0904 94.55328 
+Q 451.6224 94.55328 451.6224 97.75488 
+L 451.6224 124.64832 
+Q 451.6224 127.84992 455.0904 127.84992 
+z
+" clip-path="url(#p18b3bb4e47)" style="fill: #e7f1ea; stroke: #1f2933; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 455.0904 287.92992 
+L 511.9656 287.92992 
+Q 515.4336 287.92992 515.4336 284.72832 
+L 515.4336 257.83488 
+Q 515.4336 254.63328 511.9656 254.63328 
+L 455.0904 254.63328 
+Q 451.6224 254.63328 451.6224 257.83488 
+L 451.6224 284.72832 
+Q 451.6224 287.92992 455.0904 287.92992 
+z
+" clip-path="url(#p18b3bb4e47)" style="fill: #faefe6; stroke: #1f2933; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 122.1624 287.92992 
+L 179.0376 287.92992 
+Q 182.5056 287.92992 182.5056 284.72832 
+L 182.5056 257.83488 
+Q 182.5056 254.63328 179.0376 254.63328 
+L 122.1624 254.63328 
+Q 118.6944 254.63328 118.6944 257.83488 
+L 118.6944 284.72832 
+Q 118.6944 287.92992 122.1624 287.92992 
+z
+" clip-path="url(#p18b3bb4e47)" style="fill: #efecf5; stroke: #1f2933; stroke-width: 1.4; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 152.599011 111.2016 
+Q 317.062427 111.2016 479.960596 111.2016 
+" clip-path="url(#p18b3bb4e47)" style="fill: none; stroke: #94a3b8; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 474.760596 108.6016 
+L 479.960596 111.2016 
+L 474.760596 113.8016 
+z
+" clip-path="url(#p18b3bb4e47)" style="fill: #94a3b8; stroke: #94a3b8; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 483.528 113.199669 
+Q 483.528 191.239597 483.528 267.714277 
+" clip-path="url(#p18b3bb4e47)" style="fill: none; stroke: #94a3b8; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 486.128 262.514277 
+L 483.528 267.714277 
+L 480.928 262.514277 
+z
+" clip-path="url(#p18b3bb4e47)" style="fill: #94a3b8; stroke: #94a3b8; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 481.528989 271.2816 
+Q 317.065573 271.2816 154.167404 271.2816 
+" clip-path="url(#p18b3bb4e47)" style="fill: none; stroke: #94a3b8; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 159.367404 273.8816 
+L 154.167404 271.2816 
+L 159.367404 268.6816 
+z
+" clip-path="url(#p18b3bb4e47)" style="fill: #94a3b8; stroke: #94a3b8; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 150.6 269.283531 
+Q 150.6 191.243603 150.6 114.768923 
+" clip-path="url(#p18b3bb4e47)" style="fill: none; stroke: #94a3b8; stroke-width: 1.4; stroke-linecap: round"/>
+    <path d="M 148 119.968923 
+L 150.6 114.768923 
+L 153.2 119.968923 
+z
+" clip-path="url(#p18b3bb4e47)" style="fill: #94a3b8; stroke: #94a3b8; stroke-width: 1.4; stroke-linecap: round"/>
+   </g>
+   <g id="text_1">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #1f2933" x="150.6" y="113.4091" transform="rotate(-0 150.6 113.4091)">GPU0</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #64748b" x="150.6" y="159.2256" transform="rotate(-0 150.6 159.2256)">owns shard 0</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #1f2933" x="483.528" y="113.4091" transform="rotate(-0 483.528 113.4091)">GPU1</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #64748b" x="483.528" y="159.2256" transform="rotate(-0 483.528 159.2256)">owns shard 1</text>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #1f2933" x="483.528" y="273.4891" transform="rotate(-0 483.528 273.4891)">GPU2</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #64748b" x="483.528" y="319.3056" transform="rotate(-0 483.528 319.3056)">owns shard 2</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #1f2933" x="150.6" y="273.4891" transform="rotate(-0 150.6 273.4891)">GPU3</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #64748b" x="150.6" y="319.3056" transform="rotate(-0 150.6 319.3056)">owns shard 3</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 10px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #64748b" x="324" y="325.7088" transform="rotate(-0 324 325.7088)">Reduced shards circulate until every rank reconstructs the full tensor.</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 13.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="324" y="21.96" transform="rotate(-0 324 21.96)">Ring All-Reduce phase 2: all-gather</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p18b3bb4e47">
+   <rect x="11.88" y="27.96" width="624.24" height="320.16"/>
+  </clipPath>
+ </defs>
+</svg>
