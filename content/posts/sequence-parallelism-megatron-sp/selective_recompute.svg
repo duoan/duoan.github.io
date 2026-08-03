@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="705.6pt" height="374.4pt" viewBox="0 0 705.6 374.4" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-08-03T00:44:12.032348</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 374.4 
+L 705.6 374.4 
+L 705.6 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 160.645091 114.298065 
+L 225.729818 114.298065 
+L 225.729818 84.619355 
+L 160.645091 84.619355 
+z
+" clip-path="url(#pf91d4c737a)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 228.829091 114.298065 
+L 293.913818 114.298065 
+L 293.913818 84.619355 
+L 228.829091 84.619355 
+z
+" clip-path="url(#pf91d4c737a)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 297.013091 114.298065 
+L 362.097818 114.298065 
+L 362.097818 84.619355 
+L 297.013091 84.619355 
+z
+" clip-path="url(#pf91d4c737a)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 365.197091 114.298065 
+L 430.281818 114.298065 
+L 430.281818 84.619355 
+L 365.197091 84.619355 
+z
+" clip-path="url(#pf91d4c737a)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 160.645091 203.334194 
+L 225.729818 203.334194 
+L 225.729818 173.655484 
+L 160.645091 173.655484 
+z
+" clip-path="url(#pf91d4c737a)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 228.829091 203.334194 
+L 293.913818 203.334194 
+L 293.913818 173.655484 
+L 228.829091 173.655484 
+z
+" clip-path="url(#pf91d4c737a)" style="fill: #f7e9e8; stroke: #c44e52; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 297.013091 203.334194 
+L 362.097818 203.334194 
+L 362.097818 173.655484 
+L 297.013091 173.655484 
+z
+" clip-path="url(#pf91d4c737a)" style="fill: #faefe6; stroke: #dd8452; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 365.197091 203.334194 
+L 430.281818 203.334194 
+L 430.281818 173.655484 
+L 365.197091 173.655484 
+z
+" clip-path="url(#pf91d4c737a)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 160.645091 292.370323 
+L 225.729818 292.370323 
+L 225.729818 262.691613 
+L 160.645091 262.691613 
+z
+" clip-path="url(#pf91d4c737a)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 228.829091 292.370323 
+L 293.913818 292.370323 
+L 293.913818 262.691613 
+L 228.829091 262.691613 
+z
+" clip-path="url(#pf91d4c737a)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 297.013091 292.370323 
+L 362.097818 292.370323 
+L 362.097818 262.691613 
+L 297.013091 262.691613 
+z
+" clip-path="url(#pf91d4c737a)" style="fill: #f7e9e8; stroke: #c44e52; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_13">
+    <path d="M 365.197091 292.370323 
+L 430.281818 292.370323 
+L 430.281818 262.691613 
+L 365.197091 262.691613 
+z
+" clip-path="url(#pf91d4c737a)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="49.071273" y="102.349922" transform="rotate(-0 49.071273 102.349922)">Full save</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="193.187455" y="101.528241" transform="rotate(-0 193.187455 101.528241)">LN / MLP inputs</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="261.371455" y="101.528241" transform="rotate(-0 261.371455 101.528241)">QKV</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="329.555455" y="101.528241" transform="rotate(-0 329.555455 101.528241)">scores + softmax</text>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="397.739455" y="101.528241" transform="rotate(-0 397.739455 101.528241)">dropout</text>
+   </g>
+   <g id="text_6">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="49.071273" y="191.386051" transform="rotate(-0 49.071273 191.386051)">Full recompute</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="193.187455" y="190.56437" transform="rotate(-0 193.187455 190.56437)">block input</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="261.371455" y="190.56437" transform="rotate(-0 261.371455 190.56437)">replay whole layer</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="329.555455" y="190.56437" transform="rotate(-0 329.555455 190.56437)">no middle saves</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="397.739455" y="190.56437" transform="rotate(-0 397.739455 190.56437)">lowest memory</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start" x="49.071273" y="280.42218" transform="rotate(-0 49.071273 280.42218)">SP + selective</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="193.187455" y="279.600499" transform="rotate(-0 193.187455 279.600499)">LN / MLP inputs</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="261.371455" y="279.600499" transform="rotate(-0 261.371455 279.600499)">QKV saved</text>
+   </g>
+   <g id="text_14">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="329.555455" y="279.600499" transform="rotate(-0 329.555455 279.600499)">scores recomputed</text>
+   </g>
+   <g id="text_15">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="397.739455" y="279.600499" transform="rotate(-0 397.739455 279.600499)">best tradeoff</text>
+   </g>
+   <g id="text_16">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; fill: #c44e52" transform="translate(468.604266 264.120067)">Attention score tensors scale with S^2.</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; fill: #c44e52" transform="translate(473.263875 274.198098)">They are large, but cheaper to replay</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; fill: #c44e52" transform="translate(519.120984 284.276129)">than GEMMs are.</text>
+   </g>
+   <g id="text_17">
+    <text style="font-size: 13.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="352.8" y="21.96" transform="rotate(-0 352.8 21.96)">Selective recomputation keeps expensive activations and replays cheap, bulky ones</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pf91d4c737a">
+   <rect x="11.88" y="27.96" width="681.84" height="334.56"/>
+  </clipPath>
+ </defs>
+</svg>
