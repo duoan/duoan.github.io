@@ -1,0 +1,75 @@
+# Local full-stack ARGUS (CPU synthetic path).
+# Usage (from repo root):
+#   docker compose -f argus/docker/docker-compose.yml up --build
+services:
+  processor:
+    build:
+      context: ../..
+      dockerfile: argus/docker/Dockerfile
+    command: ["processor"]
+    environment:
+      ARGUS_DATA: /data
+      ARGUS_JOB_ID: demo
+      ARGUS_SOCKET: /data/argus.sock
+    volumes:
+      - argus-data:/data
+
+  producer0:
+    build:
+      context: ../..
+      dockerfile: argus/docker/Dockerfile
+    command: ["producer-demo"]
+    environment:
+      ARGUS_DATA: /data
+      ARGUS_JOB_ID: demo
+      ARGUS_SOCKET: /data/argus.sock
+      ARGUS_RANK: "0"
+    volumes:
+      - argus-data:/data
+    depends_on:
+      - processor
+
+  producer5:
+    build:
+      context: ../..
+      dockerfile: argus/docker/Dockerfile
+    command: ["producer-demo"]
+    environment:
+      ARGUS_DATA: /data
+      ARGUS_JOB_ID: demo
+      ARGUS_SOCKET: /data/argus.sock
+      ARGUS_RANK: "5"
+    volumes:
+      - argus-data:/data
+    depends_on:
+      - processor
+
+  analyzer:
+    build:
+      context: ../..
+      dockerfile: argus/docker/Dockerfile
+    command: ["analyze"]
+    environment:
+      ARGUS_DATA: /data
+      ARGUS_JOB_ID: demo
+    volumes:
+      - argus-data:/data
+    depends_on:
+      - producer0
+      - producer5
+
+  # One-shot e2e synthetic job (no socket fan-in). Prefer this for smoke tests.
+  sim:
+    build:
+      context: ../..
+      dockerfile: argus/docker/Dockerfile
+    command: ["sim"]
+    environment:
+      ARGUS_DATA: /data
+      ARGUS_JOB_ID: synth
+    volumes:
+      - argus-data:/data
+    profiles: ["sim"]
+
+volumes:
+  argus-data:

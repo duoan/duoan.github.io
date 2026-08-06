@@ -33,6 +33,9 @@ _testmain.go
 # Personal multi-root workspace files (reference paths outside the repo).
 *.code-workspace
 
+# --- ARGUS local docker volume mounts -----------------------------------
+/argus-data/
+
 # --- Python (playground/) -----------------------------------------------
 __pycache__/
 *.py[cod]
