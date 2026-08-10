@@ -1,3 +1,8 @@
+{{- /* Force content render so passthrough math can set hasMath before <head> finishes. */ -}}
+{{- $noop := .WordCount -}}
+{{- if .Page.Store.Get "hasMath" -}}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" integrity="sha384-zh0CIslj+VczCZtlzBcjl5nb8oasDSNSbXy+5RuYy5s/B4TvBkn4A8fXNC02Ke/4" crossorigin="anonymous">
+{{- end -}}
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <script>
     document.addEventListener("DOMContentLoaded", function () {
