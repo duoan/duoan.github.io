@@ -1,0 +1,32 @@
+# ARGUS CUDA image with CUPTI devel headers for real kernel tracing (§4.3).
+FROM nvidia/cuda:12.4.1-devel-ubuntu22.04
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    ARGUS_DATA=/data \
+    ARGUS_USE_CUPTI=1 \
+    CUDA_HOME=/usr/local/cuda
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        python3.12 \
+        python3.12-venv \
+        python3-pip \
+        g++ \
+        ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.12 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.12 /usr/bin/python
+
+WORKDIR /app
+
+COPY argus /app/argus
+COPY argus/docker/entrypoint.sh /usr/local/bin/argus-entrypoint
+RUN chmod +x /usr/local/bin/argus-entrypoint \
+    && python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir numpy torch --index-url https://download.pytorch.org/whl/cu124
+
+VOLUME ["/data"]
+
+ENTRYPOINT ["argus-entrypoint"]
+CMD ["sim"]

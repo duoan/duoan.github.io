@@ -1,7 +1,7 @@
 [project]
 name = "duoan-playground"
 version = "0.0.0"
-description = "ML systems experiments backing duoan.github.io (lives in playground/)"
+description = "ML systems experiments + ARGUS framework backing duoan.github.io"
 requires-python = ">=3.12"
 dependencies = [
     "numpy>=1.26",
@@ -33,9 +33,9 @@ explicit = true
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-# All first-party Python lives under playground/. Keep ruff out of the Hugo
-# tree (themes/PaperMod is a git submodule, public/ is build output, etc.)
-src = ["playground"]
+# First-party Python: playground demos + the ARGUS framework package.
+# Keep ruff out of the Hugo tree (themes/PaperMod is a git submodule, etc.)
+src = ["playground", "argus"]
 extend-exclude = [
     "themes/",
     "public/",
@@ -45,6 +45,10 @@ extend-exclude = [
     "static/",
     "archetypes/",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["argus/tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
