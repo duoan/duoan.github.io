@@ -3,6 +3,7 @@ title: "Foundation Model Kernel Optimization in 2026: A Field Guide Across Dense
 date: 2026-07-16
 tags: ["LLM", "MoE", "Kernel", "FlashAttention", "CUDA", "Performance", "VLM", "Diffusion", "Systems"]
 categories: ["Engineering", "Performance"]
+math: true
 draft: false
 cover:
   image: four_layers.svg
