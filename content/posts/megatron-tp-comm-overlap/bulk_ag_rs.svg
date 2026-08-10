@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="734.4pt" height="388.8pt" viewBox="0 0 734.4 388.8" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-08-03T00:51:16.618176</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 388.8 
+L 734.4 388.8 
+L 734.4 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 71.1 137.713548 
+L 133.281 137.713548 
+L 133.281 106.757419 
+L 71.1 106.757419 
+z
+" clip-path="url(#pe97fe7895c)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 136.242 137.713548 
+L 198.423 137.713548 
+L 198.423 106.757419 
+L 136.242 106.757419 
+z
+" clip-path="url(#pe97fe7895c)" style="fill: #faefe6; stroke: #dd8452; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 201.384 137.713548 
+L 263.565 137.713548 
+L 263.565 106.757419 
+L 201.384 106.757419 
+z
+" clip-path="url(#pe97fe7895c)" style="fill: #faefe6; stroke: #dd8452; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 266.526 137.713548 
+L 328.707 137.713548 
+L 328.707 106.757419 
+L 266.526 106.757419 
+z
+" clip-path="url(#pe97fe7895c)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 71.1 227.767742 
+L 133.281 227.767742 
+L 133.281 196.811613 
+L 71.1 196.811613 
+z
+" clip-path="url(#pe97fe7895c)" style="fill: #e8eef7; stroke: #4c72b0; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 136.242 227.767742 
+L 198.423 227.767742 
+L 198.423 196.811613 
+L 136.242 196.811613 
+z
+" clip-path="url(#pe97fe7895c)" style="fill: #e8eef7; stroke: #4c72b0; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 201.384 227.767742 
+L 263.565 227.767742 
+L 263.565 196.811613 
+L 201.384 196.811613 
+z
+" clip-path="url(#pe97fe7895c)" style="fill: #e8eef7; stroke: #4c72b0; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_9">
+    <path d="M 266.526 227.767742 
+L 328.707 227.767742 
+L 328.707 196.811613 
+L 266.526 196.811613 
+z
+" clip-path="url(#pe97fe7895c)" style="fill: #e7f1ea; stroke: #55a868; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start; fill: #1f2933" x="71.1" y="78.615484" transform="rotate(-0 71.1 78.615484)">communication stream</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="102.1905" y="124.305015" transform="rotate(-0 102.1905 124.305015)">event</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="167.3325" y="124.305015" transform="rotate(-0 167.3325 124.305015)">AG/RS in ubuf</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="232.4745" y="124.305015" transform="rotate(-0 232.4745 124.305015)">AG/RS</text>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="297.6165" y="124.305015" transform="rotate(-0 297.6165 124.305015)">finish</text>
+   </g>
+   <g id="text_6">
+    <text style="font-weight: 700; font-size: 9.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: start; fill: #1f2933" x="71.1" y="168.669677" transform="rotate(-0 71.1 168.669677)">main compute stream</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="102.1905" y="214.359209" transform="rotate(-0 102.1905 214.359209)">dgrad GEMM</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="167.3325" y="214.359209" transform="rotate(-0 167.3325 214.359209)">wgrad GEMM</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="232.4745" y="214.359209" transform="rotate(-0 232.4745 214.359209)">GEMM</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 7.5px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="297.6165" y="214.359209" transform="rotate(-0 297.6165 214.359209)">finish</text>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 9.3px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; fill: #64748b" transform="translate(426.42 187.240456)">Used when the dependency graph allows</text>
+    <text style="font-size: 9.3px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; fill: #64748b" transform="translate(426.42 197.654421)">GEMM and AG/RS to proceed together.</text>
+    <text style="font-size: 9.3px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; fill: #64748b" transform="translate(426.42 208.068387)">The hard part is buffer ownership.</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 13.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="367.2" y="21.96" transform="rotate(-0 367.2 21.96)">Bulk AG/RS uses separate streams and user buffers to hide independent collectives</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pe97fe7895c">
+   <rect x="11.88" y="27.96" width="710.64" height="348.96"/>
+  </clipPath>
+ </defs>
+</svg>

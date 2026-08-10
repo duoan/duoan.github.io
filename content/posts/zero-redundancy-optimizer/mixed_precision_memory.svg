@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="648pt" height="345.6pt" viewBox="0 0 648 345.6" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:date>2026-08-03T00:51:14.749924</dc:date>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.10.9, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 345.6 
+L 648 345.6 
+L 648 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 67.368 190.810435 
+L 131.526 190.810435 
+L 131.526 137.634783 
+L 67.368 137.634783 
+z
+" clip-path="url(#pcf2ee4273f)" style="fill: #e8eef7; stroke: #1f2933; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 131.526 190.810435 
+L 195.684 190.810435 
+L 195.684 137.634783 
+L 131.526 137.634783 
+z
+" clip-path="url(#pcf2ee4273f)" style="fill: #e7f1ea; stroke: #1f2933; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 195.684 190.810435 
+L 324 190.810435 
+L 324 137.634783 
+L 195.684 137.634783 
+z
+" clip-path="url(#pcf2ee4273f)" style="fill: #efecf5; stroke: #1f2933; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 324 190.810435 
+L 452.316 190.810435 
+L 452.316 137.634783 
+L 324 137.634783 
+z
+" clip-path="url(#pcf2ee4273f)" style="fill: #faefe6; stroke: #1f2933; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 452.316 190.810435 
+L 580.632 190.810435 
+L 580.632 137.634783 
+L 452.316 137.634783 
+z
+" clip-path="url(#pcf2ee4273f)" style="fill: #faefe6; stroke: #1f2933; stroke-linejoin: miter"/>
+   </g>
+   <g id="text_1">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="99.447" y="166.430109" transform="rotate(-0 99.447 166.430109)">2B</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #64748b" x="99.447" y="220.153533" transform="rotate(-0 99.447 220.153533)">fp16 params</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="163.605" y="166.430109" transform="rotate(-0 163.605 166.430109)">2B</text>
+   </g>
+   <g id="text_4">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #64748b" x="163.605" y="220.153533" transform="rotate(-0 163.605 220.153533)">fp16 grads</text>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="259.842" y="166.430109" transform="rotate(-0 259.842 166.430109)">4B</text>
+   </g>
+   <g id="text_6">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #64748b" x="259.842" y="220.153533" transform="rotate(-0 259.842 220.153533)">fp32 master</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="388.158" y="166.430109" transform="rotate(-0 388.158 166.430109)">4B</text>
+   </g>
+   <g id="text_8">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #64748b" x="388.158" y="220.153533" transform="rotate(-0 388.158 220.153533)">Adam m</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="516.474" y="166.430109" transform="rotate(-0 516.474 166.430109)">4B</text>
+   </g>
+   <g id="text_10">
+    <text style="font-size: 8px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #64748b" x="516.474" y="220.153533" transform="rotate(-0 516.474 220.153533)">Adam v</text>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 11px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle; fill: #1f2933" x="324" y="283.867826" transform="rotate(-0 324 283.867826)">2 + 2 + 4 + 4 + 4 = 16 bytes per parameter</text>
+   </g>
+   <g id="text_12">
+    <text style="font-size: 13.2px; font-family: 'DejaVu Sans', 'Arial', 'Helvetica', sans-serif; text-anchor: middle" x="324" y="21.96" transform="rotate(-0 324 21.96)">Mixed precision still keeps fp32 state for Adam</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pcf2ee4273f">
+   <rect x="11.88" y="27.96" width="624.24" height="305.76"/>
+  </clipPath>
+ </defs>
+</svg>
